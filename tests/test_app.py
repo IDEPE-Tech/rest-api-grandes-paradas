@@ -36,20 +36,24 @@ def test_optimize() -> None:
 
 
 def test_calendar_structure() -> None:
-    """/calendar must return a 50×365 matrix with one maintenance per day."""
+    """/calendar must return a list of dicts with expected keys and value types."""
     response = client.get("/calendar")
     assert response.status_code == 200
 
     payload = response.json()
-    assert "calendar" in payload
-    matrix = payload["calendar"]
+    # Non-empty list
+    assert isinstance(payload, list)
+    assert len(payload) > 0
 
-    # Validate dimensions
-    assert len(matrix) == 50
-    for row in matrix:
-        assert len(row) == 365
-
-    # Validate exactly one maintenance per day across GUs
-    for day in range(365):
-        daily_sum = sum(matrix[gu][day] for gu in range(50))
-        assert daily_sum == 1
+    # Validate structure of a sample
+    sample = payload[:10]
+    for item in sample:
+        assert set(item.keys()) == {"ug", "maintenance", "days"}
+        assert isinstance(item["ug"], str) and len(item["ug"]) == 2 and item["ug"].isdigit()
+        assert 1 <= int(item["ug"]) <= 50
+        assert isinstance(item["maintenance"], str)
+        assert isinstance(item["days"], list) and len(item["days"]) >= 1
+        # Days must be within 1..365 and sorted ascending
+        days = item["days"]
+        assert all(isinstance(d, int) and 1 <= d <= 365 for d in days)
+        assert days == sorted(days)

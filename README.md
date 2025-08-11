@@ -46,7 +46,7 @@ docker rm -f grandes-paradas-api
 |--------|---------------|---------------------------------------------------|
 | GET    | `/hello`      | Health-check endpoint. Returns a greeting.        |
 | POST   | `/optimize`   | Busy-loop for **n** seconds and returns stats.    |
-| GET    | `/calendar`   | Generates a 50×365 maintenance calendar matrix.   |
+| GET    | `/calendar`   | Generates randomized UG maintenance periods.      |
 
 ### 1. Health-check: `/hello`
 
@@ -70,13 +70,27 @@ curl -X POST "http://localhost:8000/optimize?n=5"
 
 ### 3. Maintenance calendar: `/calendar`
 
-Returns a 50×365 matrix (list of lists) in which **1** indicates that the generating unit (GU) is under maintenance on that day.
+Returns a JSON list of maintenance periods. Each item contains:
 
-```bash
-curl http://localhost:8000/calendar | jq
-# => {
-#      "calendar": [[0, 1, 1, 0, ...], ...]
-#    }
+- `ug`: string, zero-padded from "01" to "50"
+- `maintenance`: string, one of the values defined in the `maintenance` list
+- `days`: list of integers, continuous days in the range 1..365
+
+Rules used to generate data:
+
+- For each UG, 1–5 maintenance specifications are randomly selected.
+- For each selected spec, 1–2 independent periods are generated.
+- Each period has a continuous duration between 20 and 100 days.
+- Periods may overlap across UGs or even within the same UG/spec.
+
+Example response snippet:
+
+```json
+[
+  {"ug": "01", "maintenance": "AR", "days": [12, 13, 14, 15, 300, 301, 302]},
+  {"ug": "01", "maintenance": "CM", "days": [200, 201, 202]},
+  {"ug": "02", "maintenance": "TRF", "days": [50, 51, 52, 53, 172, 173, 174]}
+]
 ```
 
 ---

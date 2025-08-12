@@ -20,6 +20,15 @@ docker build -t grandes-paradas-api .
 * `-t grandes-paradas-api` tags the resulting image so you can reference it later.
 * The build will install `uvicorn`, `fastapi`, and other dependencies listed in `requirements.txt`.
 
+## ⬇️ Pulling container from Dockerhub
+The container is also available on Dockerhub. Run this commmand to get it already prepared to run:
+
+```bash
+docker pull idepetech/grandes-paradas:0.1.0
+```
+
+You can follow the runnning section to use the API methods.
+
 ## 🚀 Running the container
 
 ```bash

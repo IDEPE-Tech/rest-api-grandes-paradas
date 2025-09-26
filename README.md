@@ -24,8 +24,8 @@ docker build -t grandes-paradas-api .
 The container is also available on Dockerhub. Run this commmand to get it already prepared to run and tag it with the tag we are using in this instructions file:
 
 ```bash
-docker pull idepetech/grandes-paradas:0.1.0
-docker tag idepetech/grandes-paradas:0.1.0 grandes-paradas-api:latest
+docker pull idepetech/grandes-paradas:0.2.0
+docker tag idepetech/grandes-paradas:0.2.0 grandes-paradas-api:latest
 ```
 
 You can follow the runnning section to use the API methods.

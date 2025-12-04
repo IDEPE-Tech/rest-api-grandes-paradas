@@ -1,21 +1,29 @@
 """Grandes Paradas API main module.
 
-Provides FastAPI application with six endpoints:
+Provides FastAPI application with eight endpoints:
     * /hello    : simple health check
     * /ug/{ug_number} : returns information for a specific UG
-    * /optimizer-parameters : receives optimization parameters and returns acknowledgment
+    * /optimize/set-parameters : sets optimization parameters
+    * /optimize/get-parameters : gets current optimization parameters
     * /calendar/edit-maintenance : edits maintenance days in saved calendar with a json (ug, maintenance, old_days, new_days)
-    * /optimize : measures number of iterations within a time span
+    * /optimize : starts optimization in background and returns immediately
+    * /optimize/get-status : gets the current status and progress of the optimization
     * /calendar : generates or retrieves randomized UG maintenance periods (param: generate=false)
 """
 
-from fastapi import FastAPI, HTTPException, Depends
+import crud
+from schemas import EditMaintenanceRequest, CalendarActivityResponse
+from database import get_db, init_db
+from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 import time
 import sys
+import asyncio
+import uuid
 from pathlib import Path
 from random import randint, choice
-from typing import Any, List
+from typing import Any, List, Dict, Optional
+from collections import defaultdict
 
 # Add optimizer-grandes-paradas directory to Python path
 optimizer_path = Path(__file__).parent / "optimizer-grandes-paradas"
@@ -25,109 +33,133 @@ if optimizer_path.exists() and str(optimizer_path) not in sys.path:
 
 from optimize_module import Optimizer, constants
 
+
 # Import database modules
-from database import get_db, init_db
-from schemas import EditMaintenanceRequest, CalendarActivityResponse
-import crud
 
 app = FastAPI(title="Grandes Paradas API")
+
+# In-memory storage for running optimizers per user
+# Structure: {user: {"optimizer": Optimizer, "generator": generator, "latest_update": dict, "status": str, "run_id": str}}
+# When a new optimization starts, the old one is completely removed from this dict
+running_optimizers: Dict[str, Dict[str, Any]] = {}
 
 
 @app.on_event("startup")
 async def startup_event():
     """Initialize database on startup."""
     await init_db()
+    # Initialize default user data
+    async for db in get_db():
+        try:
+            await crud.initialize_default_user_data(db)
+            await db.commit()
+        finally:
+            await db.close()
 
 
 @app.get("/hello")
-async def hello() -> dict[str, str]:
+async def hello(user: str = Query(..., description="User identifier making the request")) -> dict[str, str]:
     """Return a simple greeting.
 
     Acts as a health-check endpoint for the API.
+
+    Parameters
+    ----------
+    user : str
+        User identifier making the request
     """
     return {"message": "hello"}
 
 
 @app.get("/ug/{ug_number}")
-async def get_ug_info(ug_number: int) -> dict[str, Any]:
-    """Retorna as informações de uma UG específica.
+async def get_ug_info(ug_number: int, user: str = Query(..., description="User identifier making the request")) -> dict[str, Any]:
+    """Return information for a specific UG.
 
     Parameters
     ----------
     ug_number : int
-        Número da UG (1-50)
+        UG number (1-50)
+    user : str
+        User identifier making the request
 
     Returns
     -------
     dict
-        Dicionário com as informações da UG:
-            • ``ug``: número da UG
-            • ``cf``: número da casa de força
-            • ``portico``: número do pórtico
-            • ``island``: número da ilha
-            • ``bladesNumber``: número de pás
-            • ``voltage``: tensão em kV
-            • ``localization``: localização (MD, ME, LR)
-            • ``producer``: fabricante (GE, VOITH, ANDRITZ)
+        Dictionary with UG information:
+            • ``ug``: UG number
+            • ``cf``: power house number
+            • ``portico``: gantry number
+            • ``island``: island number
+            • ``bladesNumber``: number of blades
+            • ``voltage``: voltage in kV
+            • ``localization``: location (MD, ME, LR)
+            • ``producer``: manufacturer (GE, VOITH, ANDRITZ)
 
     Raises
     ------
     HTTPException
-        404 se a UG não for encontrada
+        404 if UG is not found
     """
-    # Busca a UG na lista UGS_INFO
+    # Search for UG in UGS_INFO list
     ug_info = next(
         (ug for ug in constants.UGS_INFO if ug["ug"] == ug_number), None)
 
     if ug_info is None:
         raise HTTPException(
             status_code=404,
-            detail=f"UG {ug_number} não encontrada. UGs disponíveis: 1-50"
+            detail=f"UG {ug_number} not found. Available UGs: 1-50"
         )
 
     return ug_info
 
 
-@app.post("/optimizer-parameters")
-async def optimizer_parameters(
+@app.post("/optimize/set-parameters")
+async def set_optimizer_parameters(
     parameters: dict[str, Any],
+    user: str = Query(..., description="User identifier making the request"),
     db: AsyncSession = Depends(get_db)
 ) -> dict[str, str]:
-    """Recebe parâmetros de otimização em formato JSON e salva no banco de dados.
+    """Set optimization parameters in JSON format and save to database.
 
     Parameters
     ----------
     parameters : dict[str, Any]
-        JSON com parâmetros de otimização:
-            • ``method``: "AG" ou "ACO" (obrigatório)
-            • ``mode``: "params" ou "time" (obrigatório)
-            • ``n_pop``: int (opcional, necessário para AG)
-            • ``n_gen``: int (opcional, necessário para AG + params)
-            • ``n_ants``: int (opcional, necessário para ACO)
-            • ``n_iter``: int (opcional, necessário para ACO + params)
-            • ``time``: int (opcional, necessário para mode="time")
+        JSON with optimization parameters:
+            • ``method``: "AG" or "ACO" (required)
+            • ``mode``: "params" or "time" (required)
+            • ``n_pop``: int (optional, required for AG)
+            • ``n_gen``: int (optional, required for AG + params)
+            • ``n_ants``: int (optional, required for ACO)
+            • ``n_iter``: int (optional, required for ACO + params)
+            • ``time``: int (optional, required for mode="time")
+    user : str
+        User identifier making the request
 
     Returns
     -------
     dict
-        Dicionário com acknowledgment:
-            • ``status``: status da requisição
-            • ``message``: mensagem de confirmação
+        Dictionary with acknowledgment:
+            • ``status``: request status
+            • ``message``: confirmation message
 
     Raises
     ------
     HTTPException
-        400 se os parâmetros forem inválidos
-        500 se houver erro ao salvar
+        400 if parameters are invalid
+        500 if there is an error saving
     """
     try:
         # Validate parameters by creating Optimizer instance
         # This will raise validation errors if parameters are invalid
         optm = Optimizer(**parameters)
+
+        # Ensure user has data (copy from default if needed)
+        await crud.ensure_user_has_data(db, user)
         
         # Save to database
         await crud.create_or_update_optimizer(
             db=db,
+            user=user,
             method=optm.method,
             mode=optm.mode,
             n_pop=optm.n_pop,
@@ -136,10 +168,10 @@ async def optimizer_parameters(
             n_iter=optm.n_iter,
             time=optm.time
         )
-        
+
         return {
             "status": "success",
-            "message": "Parâmetros de otimização salvos com sucesso no banco de dados."
+            "message": "Optimization parameters saved successfully to database."
         }
     except Exception as e:
         # If it's a validation error from Pydantic, return 400
@@ -147,48 +179,93 @@ async def optimizer_parameters(
         if "inválido" in error_msg or "obrigatório" in error_msg or "invalid" in error_msg.lower():
             raise HTTPException(
                 status_code=400,
-                detail=f"Parâmetros inválidos: {error_msg}"
+                detail=f"Invalid parameters: {error_msg}"
             )
         raise HTTPException(
             status_code=500,
-            detail=f"Erro ao salvar parâmetros de otimização: {error_msg}"
+            detail=f"Error saving optimization parameters: {error_msg}"
         )
+
+
+@app.get("/optimize/get-parameters")
+async def get_optimizer_parameters(
+    user: str = Query(..., description="User identifier making the request"),
+    db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    """Get current optimization parameters for a specific user.
+
+    Parameters
+    ----------
+    user : str
+        User identifier making the request
+
+    Returns
+    -------
+    dict
+        Dictionary with optimization parameters:
+            • ``method``: "AG" or "ACO"
+            • ``mode``: "params" or "time"
+            • ``n_pop``: int or None
+            • ``n_gen``: int or None
+            • ``n_ants``: int or None
+            • ``n_iter``: int or None
+            • ``time``: int or None (time in seconds)
+    """
+    # Get optimizer parameters from database (uses default user if user doesn't have data)
+    optimizer_config = await crud.get_active_optimizer(db, user)
+    
+    return {
+        "method": optimizer_config.method,
+        "mode": optimizer_config.mode,
+        "n_pop": optimizer_config.n_pop,
+        "n_gen": optimizer_config.n_gen,
+        "n_ants": optimizer_config.n_ants,
+        "n_iter": optimizer_config.n_iter,
+        "time": optimizer_config.time
+    }
 
 
 @app.put("/calendar/edit-maintenance")
 async def edit_maintenance(
     request: EditMaintenanceRequest,
+    user: str = Query(..., description="User identifier making the request"),
     db: AsyncSession = Depends(get_db)
 ) -> dict[str, str]:
-    """Edita os dias de uma manutenção específica no calendário salvo.
+    """Edit days of a specific maintenance in the saved calendar.
 
     Parameters
     ----------
     request : EditMaintenanceRequest
-        Dados da edição contendo:
-            • ``ug``: número da UG (formato string, ex: "01", "25")
-            • ``maintenance``: código da manutenção (ex: "AR", "CK")
-            • ``old_days``: lista dos dias atuais a serem substituídos
-            • ``new_days``: lista dos novos dias
+        Edit data containing:
+            • ``ug``: UG number (string format, e.g.: "01", "25")
+            • ``maintenance``: maintenance code (e.g.: "AR", "CK")
+            • ``old_days``: list of current days to be replaced
+            • ``new_days``: list of new days
+    user : str
+        User identifier making the request
 
     Returns
     -------
     dict
-        Dicionário com resultado da operação:
-            • ``status``: status da operação
-            • ``message``: mensagem descritiva
+        Dictionary with operation result:
+            • ``status``: operation status
+            • ``message``: descriptive message
 
     Raises
     ------
     HTTPException
-        404 se não houver calendário ativo
-        404 se a UG ou manutenção não for encontrada
-        400 se os dias antigos não coincidirem com os salvos
-        500 se houver erro ao atualizar
+        404 if there is no active calendar
+        404 if UG or maintenance is not found
+        400 if old days don't match saved ones
+        500 if there is an error updating
     """
     try:
+        # Ensure user has data (copy from default if needed)
+        await crud.ensure_user_has_data(db, user)
+        
         success = await crud.update_activity_days(
             db=db,
+            user=user,
             ug=request.ug,
             maintenance=request.maintenance,
             old_days=request.old_days,
@@ -197,11 +274,11 @@ async def edit_maintenance(
 
         if not success:
             # Check if calendar exists
-            calendar = await crud.get_active_calendar(db)
+            calendar = await crud.get_active_calendar(db, user)
             if not calendar:
                 raise HTTPException(
                     status_code=404,
-                    detail="Nenhum calendário ativo encontrado. Gere um calendário primeiro."
+                    detail="No active calendar found. Generate a calendar first."
                 )
 
             # Check if activity exists or if old days don't match
@@ -219,7 +296,7 @@ async def edit_maintenance(
             if not activity:
                 raise HTTPException(
                     status_code=404,
-                    detail=f"Manutenção '{request.maintenance}' para UG '{request.ug}' não encontrada."
+                    detail=f"Maintenance '{request.maintenance}' for UG '{request.ug}' not found."
                 )
 
             # Old days don't match
@@ -228,14 +305,14 @@ async def edit_maintenance(
             missing_days = old_days_set - current_days
             raise HTTPException(
                 status_code=400,
-                detail=f"Dias {sorted(missing_days)} não encontrados na manutenção atual. "
-                f"Dias atuais: {sorted(current_days)}"
+                detail=f"Days {sorted(missing_days)} not found in current maintenance. "
+                f"Current days: {sorted(current_days)}"
             )
 
         return {
             "status": "success",
-            "message": f"Manutenção '{request.maintenance}' da UG '{request.ug}' editada com sucesso. "
-                      f"Substituídos {len(request.old_days)} dias por {len(request.new_days)} novos dias."
+            "message": f"Maintenance '{request.maintenance}' for UG '{request.ug}' edited successfully. "
+                      f"Replaced {len(request.old_days)} days with {len(request.new_days)} new days."
         }
 
     except HTTPException:
@@ -243,31 +320,144 @@ async def edit_maintenance(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Erro ao editar manutenção: {e}"
+            detail=f"Error editing maintenance: {e}"
         )
 
 
 # ---------- Optimize Endpoint ----------
 
 
+def run_optimizer_sync(user: str, optm: Optimizer, run_id: str):
+    """Run optimizer synchronously and update status (runs in thread pool)."""
+    generator = optm.solve()
+    running_optimizers[user] = {
+        "optimizer": optm,
+        "generator": generator,
+        "latest_update": None,
+        "status": "running",
+        "run_id": run_id
+    }
+    
+    try:
+        final_update = None
+        for update in generator:
+            # Check if this optimization was replaced by a new one
+            current_state = running_optimizers.get(user, {})
+            if current_state.get("run_id") != run_id:
+                # This run was replaced, stop processing
+                break
+            
+            current_state["latest_update"] = update
+            if update["status"] == "completed":
+                final_update = update
+                current_state["status"] = "completed"
+                break
+        
+        # Only save activities if this is still the current run
+        current_state = running_optimizers.get(user, {})
+        if final_update and "schedule" in final_update and current_state.get("run_id") == run_id:
+            # Convert schedule format from optimizer to database format
+            # Optimizer returns: ug as int (1-50), days as 0-indexed (0-364)
+            # Database expects: ug as zero-padded string ("01"-"50"), days as 1-indexed (1-365)
+            activities = []
+            for activity in final_update["schedule"]:
+                activities.append({
+                    "ug": f"{activity['ug']:02d}",  # Convert int to zero-padded string
+                    "maintenance": activity["maintenance"],
+                    # Convert 0-indexed to 1-indexed
+                    "days": [day + 1 for day in activity["days"]]
+                })
+            
+            # Store activities for async database save
+            current_state["activities"] = activities
+    except Exception as e:
+        # Only set error if this is still the current run
+        current_state = running_optimizers.get(user, {})
+        if current_state.get("run_id") == run_id:
+            current_state["status"] = "error"
+            current_state["error"] = str(e)
+
+
+async def save_optimizer_result(user: str):
+    """Save optimizer result to database asynchronously."""
+    if user not in running_optimizers:
+        return
+    
+    optimizer_state = running_optimizers[user]
+    if "activities" not in optimizer_state:
+        return
+    
+    activities = optimizer_state["activities"]
+    
+    # Create a new database session for the background task
+    from database import AsyncSessionLocal
+    async with AsyncSessionLocal() as db:
+        try:
+            # Ensure user has data (copy from default if needed)
+            await crud.ensure_user_has_data(db, user)
+            await crud.create_calendar(db=db, activities=activities, user=user)
+            await db.commit()
+            # Remove activities from state after successful save
+            del running_optimizers[user]["activities"]
+        except Exception as db_error:
+            await db.rollback()
+            running_optimizers[user]["status"] = "error"
+            running_optimizers[user]["error"] = f"Database error: {str(db_error)}"
+
+
+async def run_optimizer_background(user: str, optm: Optimizer, run_id: str):
+    """Run optimizer in background and update status."""
+    # Run the synchronous optimizer in a thread pool
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, run_optimizer_sync, user, optm, run_id)
+    
+    # Save result to database if optimization completed successfully
+    # and this is still the current run
+    current_state = running_optimizers.get(user, {})
+    if (current_state.get("run_id") == run_id and
+        current_state.get("status") == "completed"):
+        await save_optimizer_result(user)
+
+
 @app.post("/optimize")
 async def optimize(
+    user: str = Query(..., description="User identifier making the request"),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
     db: AsyncSession = Depends(get_db)
-) -> dict[str, float]:
-    """Run the optimizer and update the calendar with the optimized schedule.
+) -> dict[str, str]:
+    """Start the optimizer in background and return immediately.
 
     Uses the active optimizer parameters from the database. If no optimizer
     configuration exists, creates one with default parameters (AG, time mode, n_pop=50, time=60).
+    
+    If the user already has an optimization running, it will be cancelled and a new one started.
+
+    Parameters
+    ----------
+    user : str
+        User identifier making the request
 
     Returns
     -------
     dict
         Dictionary with:
-            • ``elapsed_seconds``: actual elapsed time in seconds
+            • ``status``: "started" - optimization is running
+            • ``message``: confirmation message
     """
-    # Get optimizer parameters from database (always returns a config, creates default if needed)
-    optimizer_config = await crud.get_active_optimizer(db)
+    # Remove any existing optimization for this user
+    # The old generator will continue running but won't update state anymore
+    if user in running_optimizers:
+        del running_optimizers[user]
     
+    # Generate unique run ID for this optimization
+    run_id = str(uuid.uuid4())
+    
+    # Ensure user has data (copy from default if needed)
+    await crud.ensure_user_has_data(db, user)
+    
+    # Get optimizer parameters from database (always returns a config, creates default if needed)
+    optimizer_config = await crud.get_active_optimizer(db, user)
+
     # Create optimizer instance
     optm = Optimizer(
         method=optimizer_config.method,
@@ -278,41 +468,78 @@ async def optimize(
         n_iter=optimizer_config.n_iter,
         time=optimizer_config.time
     )
+
+    # Start optimizer in background
+    background_tasks.add_task(run_optimizer_background, user, optm, run_id)
+
+    return {
+        "status": "started",
+        "message": "Optimization started. Use /optimize/get-status to check progress."
+    }
+
+
+@app.get("/optimize/get-status")
+async def get_optimize_status(
+    user: str = Query(..., description="User identifier making the request")
+) -> dict[str, Any]:
+    """Get the current status of the optimization process.
+
+    Parameters
+    ----------
+    user : str
+        User identifier making the request
+
+    Returns
+    -------
+    dict
+        Dictionary with:
+            • ``status``: "running", "completed", "error", or "not_found"
+            • ``elapsed_seconds``: elapsed time in seconds (if available)
+            • ``time``: total time limit in seconds (if available)
+            • ``progress_percentage``: progress percentage (0-100)
+            • ``error``: error message (if status is "error")
+    """
+    if user not in running_optimizers:
+        return {
+            "status": "not_found",
+            "message": "No optimization process found for this user."
+        }
     
-    # Run optimizer and get final result
-    final_update = None
-    for update in optm.solve():
-        if update["status"] == "completed":
-            final_update = update
-            break
+    optimizer_state = running_optimizers[user]
+    optm = optimizer_state["optimizer"]
+    latest_update = optimizer_state.get("latest_update")
+    status = optimizer_state.get("status", "running")
     
-    if not final_update or "schedule" not in final_update:
-        raise HTTPException(
-            status_code=500,
-            detail="Optimizer did not return a valid schedule"
-        )
+    if status == "error":
+        return {
+            "status": "error",
+            "error": optimizer_state.get("error", "Unknown error")
+        }
     
-    # Convert schedule format from optimizer to database format
-    # Optimizer returns: ug as int (1-50), days as 0-indexed (0-364)
-    # Database expects: ug as zero-padded string ("01"-"50"), days as 1-indexed (1-365)
-    activities = []
-    for activity in final_update["schedule"]:
-        activities.append({
-            "ug": f"{activity['ug']:02d}",  # Convert int to zero-padded string
-            "maintenance": activity["maintenance"],
-            "days": [day + 1 for day in activity["days"]]  # Convert 0-indexed to 1-indexed
-        })
+    if latest_update is None:
+        return {
+            "status": status,
+            "elapsed_seconds": 0,
+            "time": optm.time if optm.time else None,
+            "progress_percentage": 0.0
+        }
     
-    # Save schedule to database as new calendar
-    try:
-        await crud.create_calendar(db=db, activities=activities)
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error saving optimized calendar to database: {e}"
-        )
+    elapsed_seconds = latest_update.get("elapsed_seconds", 0)
+    time_limit = optm.time if optm.time else None
     
-    return {"elapsed_seconds": final_update["elapsed_seconds"]}
+    # Calculate progress percentage
+    if time_limit and time_limit > 0:
+        progress_percentage = min(100.0, (elapsed_seconds / time_limit) * 100.0)
+    else:
+        # If no time limit, we can't calculate percentage
+        progress_percentage = None
+    
+    return {
+        "status": status,
+        "elapsed_seconds": elapsed_seconds,
+        "time": time_limit,
+        "progress_percentage": progress_percentage
+    }
 
 
 # ---------- Calendar Endpoint ----------
@@ -321,6 +548,7 @@ async def optimize(
 @app.get("/calendar")
 async def generate_calendar(
     generate: bool = False,
+    user: str = Query(..., description="User identifier making the request"),
     db: AsyncSession = Depends(get_db)
 ) -> list[dict[str, Any]]:
     """Generate or retrieve maintenance periods per generating unit (UG).
@@ -328,15 +556,17 @@ async def generate_calendar(
     Parameters
     ----------
     generate : bool, optional
-        Se True, gera um novo calendário aleatório e salva no banco de dados.
-        Se False (padrão), retorna o calendário ativo do banco de dados.
-        Se não houver calendário ativo e generate=False, gera automaticamente um novo calendário.
+        If True, generates a new random calendar and saves to database.
+        If False (default), returns the active calendar from database.
+        If there is no active calendar and generate=False, automatically generates a new calendar.
+    user : str, optional
+        User identifier making the request
 
     Returns
     -------
     list[dict[str, Any]]
-        Lista de dicionários; cada dicionário agrega um ou mais períodos
-        contínuos de manutenção para uma UG sob um código de manutenção específico.
+        List of dictionaries; each dictionary aggregates one or more continuous
+        maintenance periods for a UG under a specific maintenance code.
 
     Response schema (per item):
         - ``ug``: zero-padded string from "01" to "50"
@@ -344,25 +574,30 @@ async def generate_calendar(
         - ``days``: list[int], days in 1..365 sorted ascending; may contain
           multiple continuous segments if more than one period was generated
 
-    Rules (quando generate=True):
+    Rules (when generate=True):
         - For each UG, randomly select 1 to 5 maintenance specifications.
         - For each selected specification, generate 1 to 2 independent periods.
         - Each period has a random continuous duration between 20 and 100 days.
         - Periods may overlap (even within the same UG/spec).
         - Calendar is automatically saved to database, replacing the previous active calendar.
     """
-    # Se generate=False, tentar ler o calendário ativo do banco
+    # If generate=False, try to read active calendar from database (uses default if user doesn't have data)
     if not generate:
-        activities = await crud.get_calendar_activities(db)
+        activities = await crud.get_calendar_activities(db, user)
         if activities:
             # Activities are already sorted in crud.get_calendar_activities
             return [activity.model_dump() for activity in activities]
         else:
-            # Se não houver calendário, gerar automaticamente
-            print("Nenhum calendário ativo encontrado. Gerando novo calendário automaticamente.")
+            # If no calendar exists, generate automatically
+            print(
+                f"No active calendar found for user {user}. Automatically generating new calendar.")
             generate = True
 
-    # Se generate=True, gerar novo calendário
+    # If generate=True, ensure user has data before generating (copy from default if needed)
+    if generate:
+        await crud.ensure_user_has_data(db, user)
+    
+    # Generate new calendar
     num_units = 50
     num_days_in_year = 365
     activities: list[dict[str, Any]] = []
@@ -389,14 +624,15 @@ async def generate_calendar(
                 "days": days,
             })
 
-    # Salvar novo calendário no banco de dados
+    # Save new calendar to database (ensure_user_has_data was already called above if generate=True)
     try:
-        await crud.create_calendar(db=db, activities=activities)
-        print(f"Novo calendário salvo no banco de dados com {len(activities)} atividades.")
+        await crud.create_calendar(db=db, activities=activities, user=user)
+        print(
+            f"New calendar saved to database for user {user} with {len(activities)} activities.")
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Erro ao salvar calendário no banco de dados: {e}"
+            detail=f"Error saving calendar to database: {e}"
         )
 
     # Sort activities: first by UG (numeric), then by maintenance (alphabetical)

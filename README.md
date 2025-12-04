@@ -1,6 +1,6 @@
 # Grandes Paradas API
 
-FastAPI application that provides six endpoints used by the **Grandes Paradas** project for managing maintenance calendars and optimization parameters.
+FastAPI application that provides eight endpoints used by the **Grandes Paradas** project for managing maintenance calendars and optimization parameters. All endpoints require a `user` parameter to identify the requester and maintain isolated data per user.
 
 The project ships with a ready-to-use **Dockerfile**, so you can build and run the service without installing Python locally.
 
@@ -120,15 +120,23 @@ docker rm -f grandes-paradas-api
 |--------|-----------------------------|---------------------------------------------------|
 | GET    | `/hello`                    | Health-check endpoint. Returns a greeting.        |
 | GET    | `/ug/{ug_number}`           | Returns information for a specific UG.            |
-| POST   | `/optimizer-parameters`     | Receives optimization parameters and returns acknowledgment. |
+| POST   | `/optimize/set-parameters`   | Sets optimization parameters and saves to database. |
+| GET    | `/optimize/get-parameters`  | Gets current optimization parameters for the user. |
 | PUT    | `/calendar/edit-maintenance`| Edits maintenance days in saved calendar.         |
-| POST   | `/optimize`                 | Busy-loop for **n** seconds and returns stats.    |
+| POST   | `/optimize`                 | Starts optimization in background and returns immediately. |
+| GET    | `/optimize/get-status`     | Gets the current status and progress of the optimization. |
 | GET    | `/calendar`                 | Generates or retrieves randomized UG maintenance periods. |
+
+**Note:** All endpoints require a `user` query parameter to identify the requester. Each user has isolated data (calendars and optimizer parameters).
 
 ### 1. Health-check: `/hello`
 
+Query parameter:
+* `user` – string (required) – User identifier
+
+Example:
 ```bash
-curl http://localhost:8000/hello
+curl "http://localhost:8000/hello?user=lucas"
 # => {"message": "hello"}
 ```
 
@@ -139,35 +147,71 @@ Returns detailed information for a specific generating unit (UG).
 Path parameter:
 * `ug_number` – integer – UG number (1-50)
 
+Query parameter:
+* `user` – string (required) – User identifier
+
 Example:
 ```bash
-curl http://localhost:8000/ug/1
+curl "http://localhost:8000/ug/1?user=lucas"
 # => {"ug": 1, "cf": 1, "portico": 1, "island": 1, "bladesNumber": 5, "voltage": 525, "localization": "MD", "producer": "GE"}
 ```
 
-### 3. Optimization Parameters: `/optimizer-parameters`
+### 3. Set Optimization Parameters: `/optimize/set-parameters`
 
-Receives optimization parameters in JSON format and returns acknowledgment.
+Sets optimization parameters in JSON format and saves to database.
+
+Query parameter:
+* `user` – string (required) – User identifier
 
 Request body (JSON):
 ```json
 {
-  "any_parameter": "any_value",
-  "custom_field": 123
+  "method": "AG",
+  "mode": "time",
+  "n_pop": 50,
+  "n_gen": null,
+  "n_ants": 30,
+  "n_iter": null,
+  "time": 1800
 }
 ```
 
+Parameters:
+* `method` – string (required) – "AG" (Genetic Algorithm) or "ACO" (Ant Colony Optimization)
+* `mode` – string (required) – "params" (by parameters) or "time" (by time limit)
+* `n_pop` – integer (optional, required for AG) – Population size
+* `n_gen` – integer (optional, required for AG + params mode) – Number of generations
+* `n_ants` – integer (optional, required for ACO) – Number of ants
+* `n_iter` – integer (optional, required for ACO + params mode) – Number of iterations
+* `time` – integer (optional, required for time mode) – Time limit in seconds
+
 Example:
 ```bash
-curl -X POST "http://localhost:8000/optimizer-parameters" \
+curl -X POST "http://localhost:8000/optimize/set-parameters?user=lucas" \
   -H "Content-Type: application/json" \
-  -d '{"algorithm": "genetic", "iterations": 1000}'
-# => {"status": "received", "message": "Parâmetros de otimização recebidos com sucesso. Processamento será implementado em breve."}
+  -d '{"method": "AG", "mode": "time", "n_pop": 50, "time": 1800}'
+# => {"status": "success", "message": "Optimization parameters saved successfully to database."}
 ```
 
-### 4. Edit Maintenance: `/calendar/edit-maintenance`
+### 4. Get Optimization Parameters: `/optimize/get-parameters`
+
+Gets the current optimization parameters for a specific user.
+
+Query parameter:
+* `user` – string (required) – User identifier
+
+Example:
+```bash
+curl "http://localhost:8000/optimize/get-parameters?user=lucas"
+# => {"method": "AG", "mode": "time", "n_pop": 50, "n_gen": null, "n_ants": 30, "n_iter": null, "time": 1800}
+```
+
+### 5. Edit Maintenance: `/calendar/edit-maintenance`
 
 Edits maintenance days for a specific UG and maintenance type in the saved calendar.
+
+Query parameter:
+* `user` – string (required) – User identifier
 
 Request body (JSON):
 ```json
@@ -181,35 +225,57 @@ Request body (JSON):
 
 Example:
 ```bash
-curl -X PUT "http://localhost:8000/calendar/edit-maintenance" \
+curl -X PUT "http://localhost:8000/calendar/edit-maintenance?user=lucas" \
   -H "Content-Type: application/json" \
   -d '{"ug": "01", "maintenance": "AR", "old_days": [45, 46, 47], "new_days": [50, 51, 52]}'
 # => {"status": "success", "message": "Manutenção 'AR' da UG '01' editada com sucesso. Substituídos 3 dias por 3 novos dias."}
 ```
 
-### 5. Performance test: `/optimize`
+### 6. Start Optimization: `/optimize`
+
+Starts the optimization process in background and returns immediately. The optimization runs asynchronously using the parameters set via `/optimize/set-parameters`.
 
 Query parameter:
+* `user` – string (required) – User identifier
 
-* `n` – integer – number of seconds to keep the CPU busy.
+**Note:** If the user already has an optimization running, it will be cancelled and replaced by the new one.
 
-Example (run for 5 seconds):
-
+Example:
 ```bash
-curl -X POST "http://localhost:8000/optimize?n=5"
-# => {"n": 135372443, "elapsed_seconds": 5.000819}
+curl -X POST "http://localhost:8000/optimize?user=lucas"
+# => {"status": "started", "message": "Optimization started. Use /optimize/get-status to check progress."}
 ```
 
-### 6. Maintenance calendar: `/calendar`
+### 7. Get Optimization Status: `/optimize/get-status`
 
-Generates or retrieves randomized UG maintenance periods. The calendar is automatically saved to `calendario_manutencao.json`.
+Gets the current status and progress of the optimization process.
 
 Query parameter:
+* `user` – string (required) – User identifier
+
+Response:
+* `status` – string – "running", "completed", "error", or "not_found"
+* `elapsed_seconds` – float – Elapsed time in seconds
+* `time` – integer or null – Total time limit in seconds
+* `progress_percentage` – float or null – Progress percentage (0-100)
+
+Example:
+```bash
+curl "http://localhost:8000/optimize/get-status?user=lucas"
+# => {"status": "running", "elapsed_seconds": 45.2, "time": 1800, "progress_percentage": 2.51}
+```
+
+### 8. Maintenance calendar: `/calendar`
+
+Generates or retrieves randomized UG maintenance periods. The calendar is automatically saved to the database.
+
+Query parameters:
 * `generate` – boolean (default: false) – If true, generates a new calendar; if false, returns the saved calendar.
+* `user` – string (required) – User identifier
 
 Behavior:
-- `generate=false` (default): Returns the saved calendar from `calendario_manutencao.json`
-- `generate=true`: Generates a new random calendar, saves it, and returns it
+- `generate=false` (default): Returns the saved calendar from database for the user
+- `generate=true`: Generates a new random calendar, saves it to database, and returns it
 
 Each item contains:
 - `ug`: string, zero-padded from "01" to "50"
@@ -226,11 +292,11 @@ Examples:
 
 ```bash
 # Retrieve saved calendar
-curl http://localhost:8000/calendar
+curl "http://localhost:8000/calendar?user=lucas"
 # => [{"ug": "01", "maintenance": "AR", "days": [12, 13, 14, 15, 300, 301, 302]}, ...]
 
 # Generate new calendar
-curl http://localhost:8000/calendar?generate=true
+curl "http://localhost:8000/calendar?generate=true&user=lucas"
 # => [{"ug": "01", "maintenance": "AR", "days": [45, 46, 47, 48, 200, 201, 202]}, ...]
 ```
 
@@ -244,26 +310,28 @@ Example response snippet:
 ]
 ```
 
-## 📁 Calendar File Management
+## 📁 Calendar and User Data Management
 
-The API automatically manages a calendar file (`calendario_manutencao.json`) that contains:
+The API automatically manages calendars and optimizer parameters in a PostgreSQL database. Each user has isolated data:
 
-- `generated_at`: ISO timestamp when the calendar was created
-- `last_modified`: ISO timestamp when the calendar was last edited
-- `total_activities`: Number of maintenance activities
-- `activities`: Array of all maintenance activities
+- **Calendars**: Each user has their own calendar with maintenance activities
+- **Optimizer Parameters**: Each user has their own optimizer configuration
+- **Default User**: A "default" user is created automatically with default values
+- **User Initialization**: When a new user makes their first request, their data is automatically copied from the default user
 
-### File Operations:
+### Database Operations:
 
-1. **Generate new calendar**: `GET /calendar?generate=true`
-2. **Retrieve saved calendar**: `GET /calendar`
-3. **Edit maintenance days**: `PUT /calendar/edit-maintenance`
+1. **Generate new calendar**: `GET /calendar?generate=true&user=<user_id>`
+2. **Retrieve saved calendar**: `GET /calendar?user=<user_id>`
+3. **Edit maintenance days**: `PUT /calendar/edit-maintenance?user=<user_id>`
+4. **Set optimizer parameters**: `POST /optimize/set-parameters?user=<user_id>`
+5. **Get optimizer parameters**: `GET /optimize/get-parameters?user=<user_id>`
 
 ### Error Handling:
 
-- **404**: Calendar file not found (use `generate=true` first)
-- **400**: Invalid edit parameters (old days don't match current calendar)
-- **500**: File system errors
+- **404**: Calendar not found for user (use `generate=true` first)
+- **400**: Invalid parameters (validation errors)
+- **500**: Database or server errors
 
 ---
 

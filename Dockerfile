@@ -12,8 +12,13 @@ COPY optimizer-grandes-paradas/requirements.txt ./optimizer-requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt && \
     pip install --no-cache-dir -r optimizer-requirements.txt
 
-# Copia o diretório optimizer-grandes-paradas
+# Copia o diretório optimizer-grandes-paradas completo
 COPY optimizer-grandes-paradas/ ./optimizer-grandes-paradas/
+
+# Copia a pasta Files para o root do projeto
+# O código em priority_functions.py usa ./Files/ (relativo ao WORKDIR)
+# Isso permite que o código funcione sem alterar o submodule
+COPY optimizer-grandes-paradas/Files/ ./Files/
 
 # Copia o restante da aplicação
 COPY app/ ./

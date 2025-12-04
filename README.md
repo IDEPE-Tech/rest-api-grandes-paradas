@@ -119,12 +119,12 @@ docker rm -f grandes-paradas-api
 | Method | Path                        | Description                                       |
 |--------|-----------------------------|---------------------------------------------------|
 | GET    | `/calendar`                 | Retrieves UG maintenance periods from saved calendar. |
-| PUT    | `/calendar/edit-maintenance`| Edits maintenance days in saved calendar.         |
-| GET    | `/hello`                    | Health-check endpoint. Returns a greeting.        |
+| PATCH  | `/calendar/maintenance`     | Edits maintenance days in saved calendar.         |
+| GET    | `/health`                   | Health-check endpoint. Returns a greeting.        |
 | POST   | `/optimize`                 | Starts optimization in background and returns immediately. |
-| GET    | `/optimize/get-parameters`  | Gets current optimization parameters for the user. |
-| GET    | `/optimize/get-status`     | Gets the current status and progress of the optimization. |
-| POST   | `/optimize/set-parameters`   | Sets optimization parameters and saves to database. |
+| GET    | `/optimize/parameters`      | Gets current optimization parameters for the user. |
+| GET    | `/optimize/status`          | Gets the current status and progress of the optimization. |
+| PUT    | `/optimize/parameters`      | Sets optimization parameters and saves to database. |
 | GET    | `/ug/{ug_number}`           | Returns information for a specific UG.            |
 
 **Note:** All endpoints require a `user` query parameter to identify the requester. Each user has isolated data (calendars and optimizer parameters).
@@ -165,7 +165,7 @@ Example response snippet:
 ]
 ```
 
-### 2. Edit Maintenance: `/calendar/edit-maintenance`
+### 2. Edit Maintenance: `/calendar/maintenance`
 
 Edits maintenance days for a specific UG and maintenance type in the saved calendar.
 
@@ -184,26 +184,26 @@ Request body (JSON):
 
 Example:
 ```bash
-curl -X PUT "http://localhost:8000/calendar/edit-maintenance?user=lucas" \
+curl -X PATCH "http://localhost:8000/calendar/maintenance?user=lucas" \
   -H "Content-Type: application/json" \
   -d '{"ug": "01", "maintenance": "AR", "old_days": [45, 46, 47], "new_days": [50, 51, 52]}'
 # => {"status": "success", "message": "Manutenção 'AR' da UG '01' editada com sucesso. Substituídos 3 dias por 3 novos dias."}
 ```
 
-### 3. Health-check: `/hello`
+### 3. Health-check: `/health`
 
 Query parameter:
 * `user` – string (required) – User identifier
 
 Example:
 ```bash
-curl "http://localhost:8000/hello?user=lucas"
+curl "http://localhost:8000/health?user=lucas"
 # => {"message": "hello"}
 ```
 
 ### 4. Start Optimization: `/optimize`
 
-Starts the optimization process in background and returns immediately. The optimization runs asynchronously using the parameters set via `/optimize/set-parameters`.
+Starts the optimization process in background and returns immediately. The optimization runs asynchronously using the parameters set via `/optimize/parameters`.
 
 Query parameter:
 * `user` – string (required) – User identifier
@@ -213,10 +213,10 @@ Query parameter:
 Example:
 ```bash
 curl -X POST "http://localhost:8000/optimize?user=lucas"
-# => {"status": "started", "message": "Optimization started. Use /optimize/get-status to check progress."}
+# => {"status": "started", "message": "Optimization started. Use /optimize/status to check progress."}
 ```
 
-### 5. Get Optimization Parameters: `/optimize/get-parameters`
+### 5. Get Optimization Parameters: `/optimize/parameters`
 
 Gets the current optimization parameters for a specific user.
 
@@ -225,11 +225,11 @@ Query parameter:
 
 Example:
 ```bash
-curl "http://localhost:8000/optimize/get-parameters?user=lucas"
+curl "http://localhost:8000/optimize/parameters?user=lucas"
 # => {"method": "AG", "mode": "time", "n_pop": 50, "n_gen": null, "n_ants": 30, "n_iter": null, "time": 1800}
 ```
 
-### 6. Get Optimization Status: `/optimize/get-status`
+### 6. Get Optimization Status: `/optimize/status`
 
 Gets the current status and progress of the optimization process.
 
@@ -244,11 +244,11 @@ Response:
 
 Example:
 ```bash
-curl "http://localhost:8000/optimize/get-status?user=lucas"
+curl "http://localhost:8000/optimize/status?user=lucas"
 # => {"status": "running", "elapsed_seconds": 45.2, "time": 1800, "progress_percentage": 2.51}
 ```
 
-### 7. Set Optimization Parameters: `/optimize/set-parameters`
+### 7. Set Optimization Parameters: `/optimize/parameters`
 
 Sets optimization parameters in JSON format and saves to database.
 
@@ -279,7 +279,7 @@ Parameters:
 
 Example:
 ```bash
-curl -X POST "http://localhost:8000/optimize/set-parameters?user=lucas" \
+curl -X PUT "http://localhost:8000/optimize/parameters?user=lucas" \
   -H "Content-Type: application/json" \
   -d '{"method": "AG", "mode": "time", "n_pop": 50, "time": 1800}'
 # => {"status": "success", "message": "Optimization parameters saved successfully to database."}
@@ -314,9 +314,9 @@ The API automatically manages calendars and optimizer parameters in a PostgreSQL
 
 1. **Run optimization to generate calendar**: `POST /optimize?user=<user_id>` (calendar is automatically saved when optimization completes)
 2. **Retrieve saved calendar**: `GET /calendar?user=<user_id>`
-3. **Edit maintenance days**: `PUT /calendar/edit-maintenance?user=<user_id>`
-4. **Set optimizer parameters**: `POST /optimize/set-parameters?user=<user_id>`
-5. **Get optimizer parameters**: `GET /optimize/get-parameters?user=<user_id>`
+3. **Edit maintenance days**: `PATCH /calendar/maintenance?user=<user_id>`
+4. **Set optimizer parameters**: `PUT /optimize/parameters?user=<user_id>`
+5. **Get optimizer parameters**: `GET /optimize/parameters?user=<user_id>`
 
 ### Error Handling:
 

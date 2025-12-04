@@ -2,12 +2,11 @@
 
 Provides FastAPI application with eight endpoints:
     * /calendar : retrieves UG maintenance periods from saved calendar
-    * /calendar/edit-maintenance : edits maintenance days in saved calendar with a json (ug, maintenance, old_days, new_days)
-    * /hello    : simple health check
+    * /calendar/maintenance : edits maintenance days in saved calendar with a json (ug, maintenance, old_days, new_days)
+    * /health    : simple health check
     * /optimize : starts optimization in background and returns immediately
-    * /optimize/get-parameters : gets current optimization parameters
-    * /optimize/get-status : gets the current status and progress of the optimization
-    * /optimize/set-parameters : sets optimization parameters
+    * /optimize/parameters : gets/sets current optimization parameters (GET/PUT)
+    * /optimize/status : gets the current status and progress of the optimization
     * /ug/{ug_number} : returns information for a specific UG
 """
 
@@ -93,7 +92,7 @@ async def get_calendar(
     return [activity.model_dump() for activity in activities]
 
 
-@app.put("/calendar/edit-maintenance")
+@app.patch("/calendar/maintenance")
 async def edit_maintenance(
     request: EditMaintenanceRequest,
     user: str = Query(..., description="User identifier making the request"),
@@ -192,8 +191,8 @@ async def edit_maintenance(
         )
 
 
-@app.get("/hello")
-async def hello(user: str = Query(..., description="User identifier making the request")) -> dict[str, str]:
+@app.get("/health")
+async def health(user: str = Query(..., description="User identifier making the request")) -> dict[str, str]:
     """Return a simple greeting.
 
     Acts as a health-check endpoint for the API.
@@ -354,11 +353,11 @@ async def optimize(
 
     return {
         "status": "started",
-        "message": "Optimization started. Use /optimize/get-status to check progress."
+        "message": "Optimization started. Use /optimize/status to check progress."
     }
 
 
-@app.get("/optimize/get-parameters")
+@app.get("/optimize/parameters")
 async def get_optimizer_parameters(
     user: str = Query(..., description="User identifier making the request"),
     db: AsyncSession = Depends(get_db)
@@ -396,7 +395,7 @@ async def get_optimizer_parameters(
     }
 
 
-@app.get("/optimize/get-status")
+@app.get("/optimize/status")
 async def get_optimize_status(
     user: str = Query(..., description="User identifier making the request")
 ) -> dict[str, Any]:
@@ -461,7 +460,7 @@ async def get_optimize_status(
     }
 
 
-@app.post("/optimize/set-parameters")
+@app.put("/optimize/parameters")
 async def set_optimizer_parameters(
     parameters: dict[str, Any],
     user: str = Query(..., description="User identifier making the request"),

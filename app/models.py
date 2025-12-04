@@ -42,3 +42,24 @@ class CalendarActivity(Base):
         Index('idx_activity_calendar', 'calendar_id'),
     )
 
+
+class Optimizer(Base):
+    """Model for optimizer parameters configuration."""
+    __tablename__ = "optimizers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    last_modified = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    is_active = Column(Integer, default=1, nullable=False)  # 1 for active, 0 for inactive
+    
+    method = Column(String(10), default="AG", nullable=False)  # "AG" or "ACO"
+    mode = Column(String(10), default="time", nullable=False)  # "params" or "time"
+    n_pop = Column(Integer, default=50, nullable=True)
+    n_gen = Column(Integer, nullable=True)
+    n_ants = Column(Integer, default=30, nullable=True)
+    n_iter = Column(Integer, nullable=True)
+    time = Column(Integer, default=30*60, nullable=True)  # Time in seconds
+
+    __table_args__ = (
+        Index('idx_optimizer_active', 'is_active'),
+    )

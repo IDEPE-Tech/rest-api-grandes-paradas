@@ -89,13 +89,23 @@ async def get_ug_info(ug_number: int) -> dict[str, Any]:
 
 
 @app.post("/optimizer-parameters")
-async def optimizer_parameters(parameters: dict[str, Any]) -> dict[str, str]:
-    """Recebe parâmetros de otimização em formato JSON e retorna acknowledgment.
+async def optimizer_parameters(
+    parameters: dict[str, Any],
+    db: AsyncSession = Depends(get_db)
+) -> dict[str, str]:
+    """Recebe parâmetros de otimização em formato JSON e salva no banco de dados.
 
     Parameters
     ----------
     parameters : dict[str, Any]
-        JSON com parâmetros de otimização (estrutura a ser definida)
+        JSON com parâmetros de otimização:
+            • ``method``: "AG" ou "ACO" (obrigatório)
+            • ``mode``: "params" ou "time" (obrigatório)
+            • ``n_pop``: int (opcional, necessário para AG)
+            • ``n_gen``: int (opcional, necessário para AG + params)
+            • ``n_ants``: int (opcional, necessário para ACO)
+            • ``n_iter``: int (opcional, necessário para ACO + params)
+            • ``time``: int (opcional, necessário para mode="time")
 
     Returns
     -------
@@ -103,14 +113,46 @@ async def optimizer_parameters(parameters: dict[str, Any]) -> dict[str, str]:
         Dicionário com acknowledgment:
             • ``status``: status da requisição
             • ``message``: mensagem de confirmação
-    """
-    # Por enquanto, apenas retorna um acknowledgment
-    # TODO: Implementar lógica de otimização real
 
-    return {
-        "status": "received",
-        "message": "Parâmetros de otimização recebidos com sucesso. Processamento será implementado em breve."
-    }
+    Raises
+    ------
+    HTTPException
+        400 se os parâmetros forem inválidos
+        500 se houver erro ao salvar
+    """
+    try:
+        # Validate parameters by creating Optimizer instance
+        # This will raise validation errors if parameters are invalid
+        optm = Optimizer(**parameters)
+        
+        # Save to database
+        await crud.create_or_update_optimizer(
+            db=db,
+            method=optm.method,
+            mode=optm.mode,
+            n_pop=optm.n_pop,
+            n_gen=optm.n_gen,
+            n_ants=optm.n_ants,
+            n_iter=optm.n_iter,
+            time=optm.time
+        )
+        
+        return {
+            "status": "success",
+            "message": "Parâmetros de otimização salvos com sucesso no banco de dados."
+        }
+    except Exception as e:
+        # If it's a validation error from Pydantic, return 400
+        error_msg = str(e)
+        if "inválido" in error_msg or "obrigatório" in error_msg or "invalid" in error_msg.lower():
+            raise HTTPException(
+                status_code=400,
+                detail=f"Parâmetros inválidos: {error_msg}"
+            )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao salvar parâmetros de otimização: {error_msg}"
+        )
 
 
 @app.put("/calendar/edit-maintenance")
@@ -209,29 +251,68 @@ async def edit_maintenance(
 
 
 @app.post("/optimize")
-def optimize(n: int) -> dict[str, float | int]:
-    """Busy-loop for *n* seconds and return executed iterations.
+async def optimize(
+    db: AsyncSession = Depends(get_db)
+) -> dict[str, float]:
+    """Run the optimizer and update the calendar with the optimized schedule.
 
-    Parameters
-    ----------
-    n : int
-        Target duration in seconds for which the busy loop should run.
+    Uses the active optimizer parameters from the database. If no optimizer
+    configuration exists, creates one with default parameters (AG, time mode, n_pop=50, time=60).
 
     Returns
     -------
     dict
         Dictionary with:
-            • ``n``: number of iterations performed
             • ``elapsed_seconds``: actual elapsed time in seconds
     """
-    start = time.perf_counter()
-    counter = 0
-
-    while time.perf_counter() - start < n:
-        counter += 1
-
-    elapsed = time.perf_counter() - start
-    return {"n": counter, "elapsed_seconds": elapsed}
+    # Get optimizer parameters from database (always returns a config, creates default if needed)
+    optimizer_config = await crud.get_active_optimizer(db)
+    
+    # Create optimizer instance
+    optm = Optimizer(
+        method=optimizer_config.method,
+        mode=optimizer_config.mode,
+        n_pop=optimizer_config.n_pop,
+        n_gen=optimizer_config.n_gen,
+        n_ants=optimizer_config.n_ants,
+        n_iter=optimizer_config.n_iter,
+        time=optimizer_config.time
+    )
+    
+    # Run optimizer and get final result
+    final_update = None
+    for update in optm.solve():
+        if update["status"] == "completed":
+            final_update = update
+            break
+    
+    if not final_update or "schedule" not in final_update:
+        raise HTTPException(
+            status_code=500,
+            detail="Optimizer did not return a valid schedule"
+        )
+    
+    # Convert schedule format from optimizer to database format
+    # Optimizer returns: ug as int (1-50), days as 0-indexed (0-364)
+    # Database expects: ug as zero-padded string ("01"-"50"), days as 1-indexed (1-365)
+    activities = []
+    for activity in final_update["schedule"]:
+        activities.append({
+            "ug": f"{activity['ug']:02d}",  # Convert int to zero-padded string
+            "maintenance": activity["maintenance"],
+            "days": [day + 1 for day in activity["days"]]  # Convert 0-indexed to 1-indexed
+        })
+    
+    # Save schedule to database as new calendar
+    try:
+        await crud.create_calendar(db=db, activities=activities)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error saving optimized calendar to database: {e}"
+        )
+    
+    return {"elapsed_seconds": final_update["elapsed_seconds"]}
 
 
 # ---------- Calendar Endpoint ----------

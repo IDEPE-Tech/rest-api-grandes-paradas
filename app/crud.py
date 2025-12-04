@@ -6,7 +6,7 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
 from typing import List, Optional
 from datetime import datetime
-from models import Calendar, CalendarActivity
+from models import Calendar, CalendarActivity, Optimizer
 from schemas import CalendarActivityResponse
 
 
@@ -139,4 +139,76 @@ async def update_activity_days(
     # Explicitly commit to ensure changes are persisted
     await db.commit()
     return True
+
+
+# ---------- Optimizer CRUD Operations ----------
+
+
+async def get_active_optimizer(db: AsyncSession) -> Optimizer:
+    """Get the active optimizer configuration. Creates default if none exists."""
+    result = await db.execute(
+        select(Optimizer)
+        .where(Optimizer.is_active == 1)
+        .order_by(Optimizer.created_at.desc())
+        .limit(1)
+    )
+    optimizer = result.scalar_one_or_none()
+    
+    # If no active optimizer exists, create one with default values
+    if optimizer is None:
+        optimizer = Optimizer(
+            method="AG",
+            mode="time",
+            n_pop=50,
+            n_gen=None,
+            n_ants=30,
+            n_iter=None,
+            time=60,
+            is_active=1
+        )
+        db.add(optimizer)
+        await db.flush()
+        await db.refresh(optimizer)
+    
+    return optimizer
+
+
+async def deactivate_all_optimizers(db: AsyncSession) -> None:
+    """Deactivate all existing optimizer configurations."""
+    await db.execute(
+        update(Optimizer)
+        .where(Optimizer.is_active == 1)
+        .values(is_active=0)
+    )
+
+
+async def create_or_update_optimizer(
+    db: AsyncSession,
+    method: str,
+    mode: str,
+    n_pop: Optional[int] = None,
+    n_gen: Optional[int] = None,
+    n_ants: Optional[int] = None,
+    n_iter: Optional[int] = None,
+    time: Optional[int] = None
+) -> Optimizer:
+    """Create or update optimizer parameters configuration."""
+    # Deactivate all existing optimizers
+    await deactivate_all_optimizers(db)
+    
+    # Create new optimizer configuration
+    optimizer = Optimizer(
+        method=method,
+        mode=mode,
+        n_pop=n_pop,
+        n_gen=n_gen,
+        n_ants=n_ants,
+        n_iter=n_iter,
+        time=time,
+        is_active=1
+    )
+    db.add(optimizer)
+    await db.flush()
+    await db.refresh(optimizer)
+    return optimizer
 

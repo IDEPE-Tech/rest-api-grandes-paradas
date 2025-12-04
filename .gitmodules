@@ -1,0 +1,3 @@
+[submodule "optimizer-grandes-paradas"]
+	path = optimizer-grandes-paradas
+	url = https://github.com/IDEPE-Tech/optimizer-grandes-paradas.git

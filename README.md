@@ -6,6 +6,43 @@ The project ships with a ready-to-use **Dockerfile**, so you can build and run t
 
 ---
 
+## 📥 Cloning the repository
+
+This repository uses Git submodules. When cloning, you need to include the submodules:
+
+### First-time clone (with submodules):
+
+```bash
+# Clone repository with submodules
+git clone --recurse-submodules https://github.com/IDEPE-Tech/rest-api-grandes-paradas.git
+cd rest-api-grandes-paradas
+```
+
+Alternatively, if you've already cloned without submodules:
+
+```bash
+# Initialize and update submodules
+git submodule update --init --recursive
+```
+
+### Updating submodules:
+
+To update the submodules to their latest commits:
+
+```bash
+# Update all submodules to latest commits
+git submodule update --remote --recursive
+```
+
+To update a specific submodule:
+
+```bash
+# Update only the optimizer-grandes-paradas submodule
+git submodule update --remote optimizer-grandes-paradas
+```
+
+---
+
 ## 📦 Building the Docker image
 
 ```bash

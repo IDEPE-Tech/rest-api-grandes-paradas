@@ -9,20 +9,15 @@ Provides FastAPI application with six endpoints:
     * /calendar : generates or retrieves randomized UG maintenance periods (param: generate=false)
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
 import time
-import json
-import os
 import sys
-import shutil
 from pathlib import Path
-from datetime import datetime
 from random import randint, choice
 from typing import Any, List
-from pydantic import BaseModel
 
 # Add optimizer-grandes-paradas directory to Python path
-# Works both locally and in Docker container
 optimizer_path = Path(__file__).parent / "optimizer-grandes-paradas"
 
 if optimizer_path.exists() and str(optimizer_path) not in sys.path:
@@ -30,18 +25,18 @@ if optimizer_path.exists() and str(optimizer_path) not in sys.path:
 
 from optimize_module import Optimizer, constants
 
-# ---------- Pydantic Models ----------
-
-
-class EditMaintenanceRequest(BaseModel):
-    """Modelo para edição de dias de manutenção."""
-    ug: str
-    maintenance: str
-    old_days: List[int]
-    new_days: List[int]
-
+# Import database modules
+from database import get_db, init_db
+from schemas import EditMaintenanceRequest, CalendarActivityResponse
+import crud
 
 app = FastAPI(title="Grandes Paradas API")
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize database on startup."""
+    await init_db()
 
 
 @app.get("/hello")
@@ -81,7 +76,8 @@ async def get_ug_info(ug_number: int) -> dict[str, Any]:
         404 se a UG não for encontrada
     """
     # Busca a UG na lista UGS_INFO
-    ug_info = next((ug for ug in constants.UGS_INFO if ug["ug"] == ug_number), None)
+    ug_info = next(
+        (ug for ug in constants.UGS_INFO if ug["ug"] == ug_number), None)
 
     if ug_info is None:
         raise HTTPException(
@@ -118,7 +114,10 @@ async def optimizer_parameters(parameters: dict[str, Any]) -> dict[str, str]:
 
 
 @app.put("/calendar/edit-maintenance")
-async def edit_maintenance(request: EditMaintenanceRequest) -> dict[str, str]:
+async def edit_maintenance(
+    request: EditMaintenanceRequest,
+    db: AsyncSession = Depends(get_db)
+) -> dict[str, str]:
     """Edita os dias de uma manutenção específica no calendário salvo.
 
     Parameters
@@ -140,83 +139,56 @@ async def edit_maintenance(request: EditMaintenanceRequest) -> dict[str, str]:
     Raises
     ------
     HTTPException
-        404 se o arquivo calendario_manutencao.json não existir
+        404 se não houver calendário ativo
         404 se a UG ou manutenção não for encontrada
         400 se os dias antigos não coincidirem com os salvos
-        500 se houver erro ao salvar o arquivo
+        500 se houver erro ao atualizar
     """
-    # Define o diretório de dados e o caminho do arquivo
-    data_dir = "data"
-    filename = os.path.join(data_dir, "calendario_manutencao.json")
-    
-    # Garantir que o diretório data existe
-    os.makedirs(data_dir, exist_ok=True)
-
-    # Verificar se existe um diretório com o nome do arquivo e removê-lo se necessário
-    if os.path.exists(filename) and os.path.isdir(filename):
-        try:
-            shutil.rmtree(filename)
-            print(f"Diretório '{filename}' removido. Será criado um arquivo no lugar.")
-        except Exception as e:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Erro ao remover diretório '{filename}': {e}"
-            )
-
-    # Verificar se o arquivo existe
-    if not os.path.exists(filename) or not os.path.isfile(filename):
-        raise HTTPException(
-            status_code=404,
-            detail="Arquivo calendario_manutencao.json não encontrado. Gere um calendário primeiro."
+    try:
+        success = await crud.update_activity_days(
+            db=db,
+            ug=request.ug,
+            maintenance=request.maintenance,
+            old_days=request.old_days,
+            new_days=request.new_days
         )
 
-    try:
-        # Ler o arquivo atual
-        with open(filename, 'r', encoding='utf-8') as f:
-            calendar_data = json.load(f)
+        if not success:
+            # Check if calendar exists
+            calendar = await crud.get_active_calendar(db)
+            if not calendar:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Nenhum calendário ativo encontrado. Gere um calendário primeiro."
+                )
 
-        activities = calendar_data.get("activities", [])
+            # Check if activity exists or if old days don't match
+            from models import CalendarActivity
+            from sqlalchemy import select
 
-        # Encontrar a atividade específica
-        target_activity = None
-        for activity in activities:
-            if activity["ug"] == request.ug and activity["maintenance"] == request.maintenance:
-                target_activity = activity
-                break
-
-        if not target_activity:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Manutenção '{request.maintenance}' para UG '{request.ug}' não encontrada."
+            result = await db.execute(
+                select(CalendarActivity)
+                .where(CalendarActivity.calendar_id == calendar.id)
+                .where(CalendarActivity.ug == request.ug)
+                .where(CalendarActivity.maintenance == request.maintenance)
             )
+            activity = result.scalar_one_or_none()
 
-        # Verificar se os dias antigos coincidem
-        current_days = set(target_activity["days"])
-        old_days_set = set(request.old_days)
+            if not activity:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Manutenção '{request.maintenance}' para UG '{request.ug}' não encontrada."
+                )
 
-        if not old_days_set.issubset(current_days):
+            # Old days don't match
+            current_days = set(activity.days)
+            old_days_set = set(request.old_days)
             missing_days = old_days_set - current_days
             raise HTTPException(
                 status_code=400,
                 detail=f"Dias {sorted(missing_days)} não encontrados na manutenção atual. "
                 f"Dias atuais: {sorted(current_days)}"
             )
-
-        # Realizar a edição
-        # Remover os dias antigos
-        new_days_list = [day for day in target_activity["days"]
-                         if day not in old_days_set]
-        # Adicionar os novos dias
-        new_days_list.extend(request.new_days)
-        # Ordenar e remover duplicatas
-        target_activity["days"] = sorted(list(set(new_days_list)))
-
-        # Atualizar timestamp
-        calendar_data["last_modified"] = datetime.now().isoformat()
-
-        # Salvar o arquivo atualizado
-        with open(filename, 'w', encoding='utf-8') as f:
-            json.dump(calendar_data, f, indent=2, ensure_ascii=False)
 
         return {
             "status": "success",
@@ -266,15 +238,18 @@ def optimize(n: int) -> dict[str, float | int]:
 
 
 @app.get("/calendar")
-def generate_calendar(generate: bool = False) -> list[dict[str, Any]]:
+async def generate_calendar(
+    generate: bool = False,
+    db: AsyncSession = Depends(get_db)
+) -> list[dict[str, Any]]:
     """Generate or retrieve maintenance periods per generating unit (UG).
 
     Parameters
     ----------
     generate : bool, optional
-        Se True, gera um novo calendário aleatório e salva no arquivo.
-        Se False (padrão), retorna o calendário salvo em calendario_manutencao.json.
-        Se o arquivo não existir e generate=False, gera automaticamente um novo calendário.
+        Se True, gera um novo calendário aleatório e salva no banco de dados.
+        Se False (padrão), retorna o calendário ativo do banco de dados.
+        Se não houver calendário ativo e generate=False, gera automaticamente um novo calendário.
 
     Returns
     -------
@@ -293,41 +268,17 @@ def generate_calendar(generate: bool = False) -> list[dict[str, Any]]:
         - For each selected specification, generate 1 to 2 independent periods.
         - Each period has a random continuous duration between 20 and 100 days.
         - Periods may overlap (even within the same UG/spec).
-        - Calendar is automatically saved to calendario_manutencao.json.
+        - Calendar is automatically saved to database, replacing the previous active calendar.
     """
-    # Define o diretório de dados e o caminho do arquivo
-    data_dir = "data"
-    filename = os.path.join(data_dir, "calendario_manutencao.json")
-    
-    # Garantir que o diretório data existe
-    os.makedirs(data_dir, exist_ok=True)
-
-    # Verificar se existe um diretório com o nome do arquivo e removê-lo se necessário
-    if os.path.exists(filename) and os.path.isdir(filename):
-        try:
-            shutil.rmtree(filename)
-            print(f"Diretório '{filename}' removido. Será criado um arquivo no lugar.")
-        except Exception as e:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Erro ao remover diretório '{filename}': {e}"
-            )
-
-    # Se generate=False, tentar ler o arquivo existente
+    # Se generate=False, tentar ler o calendário ativo do banco
     if not generate:
-        if os.path.exists(filename) and os.path.isfile(filename):
-            try:
-                with open(filename, 'r', encoding='utf-8') as f:
-                    calendar_data = json.load(f)
-                return calendar_data.get("activities", [])
-            except Exception as e:
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Erro ao ler arquivo de calendário: {e}"
-                )
+        activities = await crud.get_calendar_activities(db)
+        if activities:
+            # Activities are already sorted in crud.get_calendar_activities
+            return [activity.model_dump() for activity in activities]
         else:
-            # Se o arquivo não existir, gerar automaticamente
-            print(f"Arquivo '{filename}' não encontrado. Gerando novo calendário automaticamente.")
+            # Se não houver calendário, gerar automaticamente
+            print("Nenhum calendário ativo encontrado. Gerando novo calendário automaticamente.")
             generate = True
 
     # Se generate=True, gerar novo calendário
@@ -357,18 +308,19 @@ def generate_calendar(generate: bool = False) -> list[dict[str, Any]]:
                 "days": days,
             })
 
-    # Salvar novo calendário
-    calendar_data = {
-        "generated_at": datetime.now().isoformat(),
-        "total_activities": len(activities),
-        "activities": activities
-    }
-
+    # Salvar novo calendário no banco de dados
     try:
-        with open(filename, 'w', encoding='utf-8') as f:
-            json.dump(calendar_data, f, indent=2, ensure_ascii=False)
-        print(f"Novo calendário salvo em: {filename}")
+        await crud.create_calendar(db=db, activities=activities)
+        print(f"Novo calendário salvo no banco de dados com {len(activities)} atividades.")
     except Exception as e:
-        print(f"Erro ao salvar arquivo: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao salvar calendário no banco de dados: {e}"
+        )
 
-    return activities
+    # Sort activities: first by UG (numeric), then by maintenance (alphabetical)
+    sorted_activities = sorted(
+        activities,
+        key=lambda act: (int(act["ug"]), act["maintenance"])
+    )
+    return sorted_activities

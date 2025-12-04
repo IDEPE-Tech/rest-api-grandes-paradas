@@ -1,6 +1,26 @@
 version: '3.8'
 
 services:
+  db:
+    image: postgres:15-alpine
+    container_name: grandes-paradas-db
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=grandes_paradas
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - grandes-paradas-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   grandes-paradas-api:
     build: .
     container_name: grandes-paradas-api
@@ -9,11 +29,16 @@ services:
     restart: unless-stopped
     environment:
       - PYTHONUNBUFFERED=1
-    volumes:
-      # Monta um diretório de dados para persistir o arquivo de calendário
-      - ./data:/app/data
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/grandes_paradas
+    depends_on:
+      db:
+        condition: service_healthy
     networks:
       - grandes-paradas-network
+    # Data is now stored in PostgreSQL, no need for data volume
+
+volumes:
+  postgres_data:
 
 networks:
   grandes-paradas-network:

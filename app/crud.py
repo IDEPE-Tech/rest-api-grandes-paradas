@@ -13,7 +13,9 @@ from models import (
     DEFAULT_OPTIMIZER_METHOD,
     DEFAULT_OPTIMIZER_MODE,
     DEFAULT_OPTIMIZER_N_POP,
+    DEFAULT_OPTIMIZER_N_GEN,
     DEFAULT_OPTIMIZER_N_ANTS,
+    DEFAULT_OPTIMIZER_N_ITER,
     DEFAULT_OPTIMIZER_TIME
 )
 from schemas import CalendarActivityResponse
@@ -265,9 +267,9 @@ async def initialize_default_user_data(db: AsyncSession) -> None:
             method=DEFAULT_OPTIMIZER_METHOD,
             mode=DEFAULT_OPTIMIZER_MODE,
             n_pop=DEFAULT_OPTIMIZER_N_POP,
-            n_gen=None,
+            n_gen=DEFAULT_OPTIMIZER_N_GEN,
             n_ants=DEFAULT_OPTIMIZER_N_ANTS,
-            n_iter=None,
+            n_iter=DEFAULT_OPTIMIZER_N_ITER,
             time=DEFAULT_OPTIMIZER_TIME,
             is_active=1
         )

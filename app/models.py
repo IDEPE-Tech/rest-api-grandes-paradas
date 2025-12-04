@@ -9,7 +9,9 @@ from database import Base
 DEFAULT_OPTIMIZER_METHOD = "AG"
 DEFAULT_OPTIMIZER_MODE = "time"
 DEFAULT_OPTIMIZER_N_POP = 50
+DEFAULT_OPTIMIZER_N_GEN = None
 DEFAULT_OPTIMIZER_N_ANTS = 30
+DEFAULT_OPTIMIZER_N_ITER = None
 DEFAULT_OPTIMIZER_TIME = 30 * 60  # 30 minutes in seconds
 
 
@@ -65,9 +67,9 @@ class Optimizer(Base):
     method = Column(String(10), default=DEFAULT_OPTIMIZER_METHOD, nullable=False)  # "AG" or "ACO"
     mode = Column(String(10), default=DEFAULT_OPTIMIZER_MODE, nullable=False)  # "params" or "time"
     n_pop = Column(Integer, default=DEFAULT_OPTIMIZER_N_POP, nullable=True)
-    n_gen = Column(Integer, nullable=True)
+    n_gen = Column(Integer, default=DEFAULT_OPTIMIZER_N_GEN, nullable=True)
     n_ants = Column(Integer, default=DEFAULT_OPTIMIZER_N_ANTS, nullable=True)
-    n_iter = Column(Integer, nullable=True)
+    n_iter = Column(Integer, default=DEFAULT_OPTIMIZER_N_ITER, nullable=True)
     time = Column(Integer, default=DEFAULT_OPTIMIZER_TIME, nullable=True)  # Time in seconds
 
     __table_args__ = (

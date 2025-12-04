@@ -6,9 +6,14 @@ WORKDIR /app
 
 # Copia somente arquivos de dependências primeiro para aproveitar cache
 COPY requirements.txt ./
+COPY optimizer-grandes-paradas/requirements.txt ./optimizer-requirements.txt
 
-# Instala dependências
-RUN pip install --no-cache-dir -r requirements.txt
+# Instala dependências da API e do optimizer
+RUN pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir -r optimizer-requirements.txt
+
+# Copia o diretório optimizer-grandes-paradas
+COPY optimizer-grandes-paradas/ ./optimizer-grandes-paradas/
 
 # Copia o restante da aplicação
 COPY app/ ./

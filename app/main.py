@@ -13,118 +13,21 @@ from fastapi import FastAPI, HTTPException
 import time
 import json
 import os
+import sys
+from pathlib import Path
 from datetime import datetime
 from random import randint, choice
 from typing import Any, List
 from pydantic import BaseModel
 
-MAINTENANCE_CODES = [
-    'AR', 'CK', 'C', 'CDG', 'CM', 'CM2', 'CV', 'DE', 'ARO', 'RK', 'E',
-    'IBK', 'JD', 'RAC', 'R25', 'TRF', 'TAR', 'TK', 'VB', 'VP', 'VPK', 'VE',
-]
+# Add optimizer-grandes-paradas directory to Python path
+# Works both locally and in Docker container
+optimizer_path = Path(__file__).parent / "optimizer-grandes-paradas"
 
-UGS_INFO = [
-    {"ug": 1, "cf": 1, "portico": 1, "island": 1, "bladesNumber": 5,
-        "voltage": 525, "localization": "MD", "producer": "GE"},
-    {"ug": 2, "cf": 1, "portico": 1, "island": 1, "bladesNumber": 5,
-        "voltage": 525, "localization": "MD", "producer": "VOITH"},
-    {"ug": 3, "cf": 1, "portico": 1, "island": 1, "bladesNumber": 5,
-        "voltage": 525, "localization": "MD", "producer": "VOITH"},
-    {"ug": 4, "cf": 1, "portico": 1, "island": 1, "bladesNumber": 5,
-        "voltage": 525, "localization": "MD", "producer": "ANDRITZ"},
-    {"ug": 5, "cf": 1, "portico": 1, "island": 2, "bladesNumber": 5,
-        "voltage": 525, "localization": "MD", "producer": "GE"},
-    {"ug": 6, "cf": 1, "portico": 1, "island": 2, "bladesNumber": 5,
-        "voltage": 525, "localization": "MD", "producer": "VOITH"},
-    {"ug": 7, "cf": 1, "portico": 1, "island": 2, "bladesNumber": 5,
-        "voltage": 525, "localization": "MD", "producer": "GE"},
-    {"ug": 8, "cf": 1, "portico": 1, "island": 2, "bladesNumber": 5,
-        "voltage": 525, "localization": "MD", "producer": "ANDRITZ"},
-    {"ug": 9, "cf": 2, "portico": 2, "island": 3, "bladesNumber": 5,
-        "voltage": 525, "localization": "ME", "producer": "GE"},
-    {"ug": 10, "cf": 2, "portico": 2, "island": 3, "bladesNumber": 5,
-        "voltage": 525, "localization": "ME", "producer": "VOITH"},
-    {"ug": 11, "cf": 2, "portico": 2, "island": 3, "bladesNumber": 5,
-        "voltage": 525, "localization": "ME", "producer": "ANDRITZ"},
-    {"ug": 12, "cf": 2, "portico": 2, "island": 3, "bladesNumber": 5,
-        "voltage": 525, "localization": "ME", "producer": "GE"},
-    {"ug": 13, "cf": 2, "portico": 2, "island": 4, "bladesNumber": 4,
-        "voltage": 525, "localization": "ME", "producer": "ANDRITZ"},
-    {"ug": 14, "cf": 2, "portico": 2, "island": 4, "bladesNumber": 4,
-        "voltage": 525, "localization": "ME", "producer": "VOITH"},
-    {"ug": 15, "cf": 2, "portico": 2, "island": 4, "bladesNumber": 4,
-        "voltage": 525, "localization": "ME", "producer": "GE"},
-    {"ug": 16, "cf": 2, "portico": 2, "island": 4, "bladesNumber": 4,
-        "voltage": 525, "localization": "ME", "producer": "ANDRITZ"},
-    {"ug": 17, "cf": 2, "portico": 2, "island": 5, "bladesNumber": 4,
-        "voltage": 525, "localization": "ME", "producer": "VOITH"},
-    {"ug": 18, "cf": 2, "portico": 2, "island": 5, "bladesNumber": 4,
-        "voltage": 525, "localization": "ME", "producer": "GE"},
-    {"ug": 19, "cf": 2, "portico": 2, "island": 5, "bladesNumber": 4,
-        "voltage": 525, "localization": "ME", "producer": "ANDRITZ"},
-    {"ug": 20, "cf": 2, "portico": 2, "island": 5, "bladesNumber": 4,
-        "voltage": 525, "localization": "ME", "producer": "VOITH"},
-    {"ug": 21, "cf": 3, "portico": 2, "island": 6, "bladesNumber": 5,
-        "voltage": 525, "localization": "ME", "producer": "GE"},
-    {"ug": 22, "cf": 3, "portico": 2, "island": 6, "bladesNumber": 5,
-        "voltage": 525, "localization": "ME", "producer": "VOITH"},
-    {"ug": 23, "cf": 3, "portico": 2, "island": 6, "bladesNumber": 4,
-        "voltage": 525, "localization": "ME", "producer": "GE"},
-    {"ug": 24, "cf": 3, "portico": 2, "island": 6, "bladesNumber": 4,
-        "voltage": 525, "localization": "ME", "producer": "ANDRITZ"},
-    {"ug": 25, "cf": 3, "portico": 2, "island": 7, "bladesNumber": 4,
-        "voltage": 525, "localization": "ME", "producer": "GE"},
-    {"ug": 26, "cf": 3, "portico": 2, "island": 7, "bladesNumber": 4,
-        "voltage": 525, "localization": "ME", "producer": "ANDRITZ"},
-    {"ug": 27, "cf": 3, "portico": 2, "island": 7, "bladesNumber": 4,
-        "voltage": 525, "localization": "ME", "producer": "VOITH"},
-    {"ug": 28, "cf": 3, "portico": 2, "island": 7, "bladesNumber": 4,
-        "voltage": 525, "localization": "ME", "producer": "GE"},
-    {"ug": 29, "cf": 3, "portico": 2, "island": 8, "bladesNumber": 4,
-        "voltage": 525, "localization": "ME", "producer": "VOITH"},
-    {"ug": 30, "cf": 3, "portico": 2, "island": 8, "bladesNumber": 4,
-        "voltage": 525, "localization": "ME", "producer": "GE"},
-    {"ug": 31, "cf": 3, "portico": 2, "island": 8, "bladesNumber": 5,
-        "voltage": 525, "localization": "ME", "producer": "ANDRITZ"},
-    {"ug": 32, "cf": 3, "portico": 2, "island": 8, "bladesNumber": 5,
-        "voltage": 525, "localization": "ME", "producer": "VOITH"},
-    {"ug": 33, "cf": 4, "portico": 3, "island": 9, "bladesNumber": 5,
-        "voltage": 525, "localization": "LR", "producer": "ANDRITZ"},
-    {"ug": 34, "cf": 4, "portico": 3, "island": 9, "bladesNumber": 5,
-        "voltage": 525, "localization": "LR", "producer": "GE"},
-    {"ug": 35, "cf": 4, "portico": 3, "island": 9, "bladesNumber": 5,
-        "voltage": 525, "localization": "LR", "producer": "VOITH"},
-    {"ug": 36, "cf": 4, "portico": 3, "island": 9, "bladesNumber": 5,
-        "voltage": 525, "localization": "LR", "producer": "ANDRITZ"},
-    {"ug": 37, "cf": 4, "portico": 3, "island": 10, "bladesNumber": 4,
-        "voltage": 525, "localization": "LR", "producer": "GE"},
-    {"ug": 38, "cf": 4, "portico": 3, "island": 10, "bladesNumber": 4,
-        "voltage": 525, "localization": "LR", "producer": "ANDRITZ"},
-    {"ug": 39, "cf": 4, "portico": 3, "island": 10, "bladesNumber": 4,
-        "voltage": 525, "localization": "LR", "producer": "VOITH"},
-    {"ug": 40, "cf": 4, "portico": 3, "island": 10, "bladesNumber": 4,
-        "voltage": 525, "localization": "LR", "producer": "GE"},
-    {"ug": 41, "cf": 4, "portico": 3, "island": 11, "bladesNumber": 4,
-        "voltage": 525, "localization": "LR", "producer": "GE"},
-    {"ug": 42, "cf": 4, "portico": 3, "island": 11, "bladesNumber": 4,
-        "voltage": 525, "localization": "LR", "producer": "GE"},
-    {"ug": 43, "cf": 4, "portico": 3, "island": 11, "bladesNumber": 4,
-        "voltage": 525, "localization": "LR", "producer": "VOITH"},
-    {"ug": 44, "cf": 4, "portico": 3, "island": 11, "bladesNumber": 4,
-        "voltage": 525, "localization": "LR", "producer": "GE"},
-    {"ug": 45, "cf": 5, "portico": 3, "island": 12, "bladesNumber": 5,
-        "voltage": 230, "localization": "LR", "producer": "ANDRITZ"},
-    {"ug": 46, "cf": 5, "portico": 3, "island": 12, "bladesNumber": 5,
-        "voltage": 230, "localization": "LR", "producer": "VOITH"},
-    {"ug": 47, "cf": 5, "portico": 3, "island": 12, "bladesNumber": 5,
-        "voltage": 230, "localization": "LR", "producer": "GE"},
-    {"ug": 48, "cf": 5, "portico": 3, "island": 13, "bladesNumber": 5,
-        "voltage": 230, "localization": "LR", "producer": "ANDRITZ"},
-    {"ug": 49, "cf": 5, "portico": 3, "island": 13, "bladesNumber": 5,
-        "voltage": 230, "localization": "ME", "producer": "VOITH"},
-    {"ug": 50, "cf": 5, "portico": 3, "island": 13, "bladesNumber": 5,
-        "voltage": 230, "localization": "ME", "producer": "GE"}
-]
+if optimizer_path.exists() and str(optimizer_path) not in sys.path:
+    sys.path.insert(0, str(optimizer_path))
+
+from optimize_module import Optimizer, constants
 
 # ---------- Pydantic Models ----------
 
@@ -177,7 +80,7 @@ async def get_ug_info(ug_number: int) -> dict[str, Any]:
         404 se a UG não for encontrada
     """
     # Busca a UG na lista UGS_INFO
-    ug_info = next((ug for ug in UGS_INFO if ug["ug"] == ug_number), None)
+    ug_info = next((ug for ug in constants.UGS_INFO if ug["ug"] == ug_number), None)
 
     if ug_info is None:
         raise HTTPException(
@@ -409,7 +312,7 @@ def generate_calendar(generate: bool = False) -> list[dict[str, Any]]:
         # Randomly choose how many different maintenance codes this UG will have
         num_activities = randint(1, 5)
         for _ in range(num_activities):
-            specification = choice(MAINTENANCE_CODES)
+            specification = choice(list(constants.MAINTENANCES_TYPES.keys()))
 
             # For this specification, generate 1 to 2 independent periods
             num_periods = randint(1, 2)

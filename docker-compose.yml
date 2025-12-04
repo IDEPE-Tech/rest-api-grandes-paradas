@@ -10,8 +10,8 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
     volumes:
-      # Monta o diretório atual para persistir o arquivo de calendário
-      - ./calendario_manutencao.json:/app/calendario_manutencao.json
+      # Monta um diretório de dados para persistir o arquivo de calendário
+      - ./data:/app/data
     networks:
       - grandes-paradas-network
 

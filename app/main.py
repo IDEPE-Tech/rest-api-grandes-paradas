@@ -14,6 +14,7 @@ import time
 import json
 import os
 import sys
+import shutil
 from pathlib import Path
 from datetime import datetime
 from random import randint, choice
@@ -144,10 +145,26 @@ async def edit_maintenance(request: EditMaintenanceRequest) -> dict[str, str]:
         400 se os dias antigos não coincidirem com os salvos
         500 se houver erro ao salvar o arquivo
     """
-    filename = "calendario_manutencao.json"
+    # Define o diretório de dados e o caminho do arquivo
+    data_dir = "data"
+    filename = os.path.join(data_dir, "calendario_manutencao.json")
+    
+    # Garantir que o diretório data existe
+    os.makedirs(data_dir, exist_ok=True)
+
+    # Verificar se existe um diretório com o nome do arquivo e removê-lo se necessário
+    if os.path.exists(filename) and os.path.isdir(filename):
+        try:
+            shutil.rmtree(filename)
+            print(f"Diretório '{filename}' removido. Será criado um arquivo no lugar.")
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Erro ao remover diretório '{filename}': {e}"
+            )
 
     # Verificar se o arquivo existe
-    if not os.path.exists(filename):
+    if not os.path.exists(filename) or not os.path.isfile(filename):
         raise HTTPException(
             status_code=404,
             detail="Arquivo calendario_manutencao.json não encontrado. Gere um calendário primeiro."
@@ -257,7 +274,7 @@ def generate_calendar(generate: bool = False) -> list[dict[str, Any]]:
     generate : bool, optional
         Se True, gera um novo calendário aleatório e salva no arquivo.
         Se False (padrão), retorna o calendário salvo em calendario_manutencao.json.
-        Se o arquivo não existir e generate=False, retorna erro 404.
+        Se o arquivo não existir e generate=False, gera automaticamente um novo calendário.
 
     Returns
     -------
@@ -277,17 +294,28 @@ def generate_calendar(generate: bool = False) -> list[dict[str, Any]]:
         - Each period has a random continuous duration between 20 and 100 days.
         - Periods may overlap (even within the same UG/spec).
         - Calendar is automatically saved to calendario_manutencao.json.
-
-    Raises
-    ------
-    HTTPException
-        404 se generate=False e o arquivo calendario_manutencao.json não existir
     """
-    filename = "calendario_manutencao.json"
+    # Define o diretório de dados e o caminho do arquivo
+    data_dir = "data"
+    filename = os.path.join(data_dir, "calendario_manutencao.json")
+    
+    # Garantir que o diretório data existe
+    os.makedirs(data_dir, exist_ok=True)
+
+    # Verificar se existe um diretório com o nome do arquivo e removê-lo se necessário
+    if os.path.exists(filename) and os.path.isdir(filename):
+        try:
+            shutil.rmtree(filename)
+            print(f"Diretório '{filename}' removido. Será criado um arquivo no lugar.")
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Erro ao remover diretório '{filename}': {e}"
+            )
 
     # Se generate=False, tentar ler o arquivo existente
     if not generate:
-        if os.path.exists(filename):
+        if os.path.exists(filename) and os.path.isfile(filename):
             try:
                 with open(filename, 'r', encoding='utf-8') as f:
                     calendar_data = json.load(f)
@@ -298,10 +326,9 @@ def generate_calendar(generate: bool = False) -> list[dict[str, Any]]:
                     detail=f"Erro ao ler arquivo de calendário: {e}"
                 )
         else:
-            raise HTTPException(
-                status_code=404,
-                detail="Arquivo calendario_manutencao.json não encontrado. Use generate=true para criar um novo calendário."
-            )
+            # Se o arquivo não existir, gerar automaticamente
+            print(f"Arquivo '{filename}' não encontrado. Gerando novo calendário automaticamente.")
+            generate = True
 
     # Se generate=True, gerar novo calendário
     num_units = 50

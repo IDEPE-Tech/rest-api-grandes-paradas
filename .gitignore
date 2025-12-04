@@ -32,3 +32,7 @@ pip-delete-this-directory.txt
 # Editor directories and files
 .idea/
 .vscode/
+
+# Data directory with generated calendar
+data/
+calendario_manutencao.json

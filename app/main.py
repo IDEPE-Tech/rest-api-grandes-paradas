@@ -24,13 +24,6 @@ from pathlib import Path
 from random import randint, choice
 from typing import Any, List, Dict, Optional
 from collections import defaultdict
-
-# Add optimizer-grandes-paradas directory to Python path
-optimizer_path = Path(__file__).parent / "optimizer-grandes-paradas"
-
-if optimizer_path.exists() and str(optimizer_path) not in sys.path:
-    sys.path.insert(0, str(optimizer_path))
-
 from optimize_module import Optimizer, constants
 
 
@@ -155,7 +148,7 @@ async def set_optimizer_parameters(
 
         # Ensure user has data (copy from default if needed)
         await crud.ensure_user_has_data(db, user)
-        
+
         # Save to database
         await crud.create_or_update_optimizer(
             db=db,
@@ -213,7 +206,7 @@ async def get_optimizer_parameters(
     """
     # Get optimizer parameters from database (uses default user if user doesn't have data)
     optimizer_config = await crud.get_active_optimizer(db, user)
-    
+
     return {
         "method": optimizer_config.method,
         "mode": optimizer_config.mode,
@@ -262,7 +255,7 @@ async def edit_maintenance(
     try:
         # Ensure user has data (copy from default if needed)
         await crud.ensure_user_has_data(db, user)
-        
+
         success = await crud.update_activity_days(
             db=db,
             user=user,
@@ -337,7 +330,7 @@ def run_optimizer_sync(user: str, optm: Optimizer, run_id: str):
         "status": "running",
         "run_id": run_id
     }
-    
+
     try:
         final_update = None
         for update in generator:
@@ -346,13 +339,13 @@ def run_optimizer_sync(user: str, optm: Optimizer, run_id: str):
             if current_state.get("run_id") != run_id:
                 # This run was replaced, stop processing
                 break
-            
+
             current_state["latest_update"] = update
             if update["status"] == "completed":
                 final_update = update
                 current_state["status"] = "completed"
                 break
-        
+
         # Only save activities if this is still the current run
         current_state = running_optimizers.get(user, {})
         if final_update and "schedule" in final_update and current_state.get("run_id") == run_id:
@@ -362,12 +355,13 @@ def run_optimizer_sync(user: str, optm: Optimizer, run_id: str):
             activities = []
             for activity in final_update["schedule"]:
                 activities.append({
-                    "ug": f"{activity['ug']:02d}",  # Convert int to zero-padded string
+                    # Convert int to zero-padded string
+                    "ug": f"{activity['ug']:02d}",
                     "maintenance": activity["maintenance"],
                     # Convert 0-indexed to 1-indexed
                     "days": [day + 1 for day in activity["days"]]
                 })
-            
+
             # Store activities for async database save
             current_state["activities"] = activities
     except Exception as e:
@@ -382,13 +376,13 @@ async def save_optimizer_result(user: str):
     """Save optimizer result to database asynchronously."""
     if user not in running_optimizers:
         return
-    
+
     optimizer_state = running_optimizers[user]
     if "activities" not in optimizer_state:
         return
-    
+
     activities = optimizer_state["activities"]
-    
+
     # Create a new database session for the background task
     from database import AsyncSessionLocal
     async with AsyncSessionLocal() as db:
@@ -410,12 +404,12 @@ async def run_optimizer_background(user: str, optm: Optimizer, run_id: str):
     # Run the synchronous optimizer in a thread pool
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, run_optimizer_sync, user, optm, run_id)
-    
+
     # Save result to database if optimization completed successfully
     # and this is still the current run
     current_state = running_optimizers.get(user, {})
     if (current_state.get("run_id") == run_id and
-        current_state.get("status") == "completed"):
+            current_state.get("status") == "completed"):
         await save_optimizer_result(user)
 
 
@@ -429,7 +423,7 @@ async def optimize(
 
     Uses the active optimizer parameters from the database. If no optimizer
     configuration exists, creates one with default parameters (AG, time mode, n_pop=50, time=60).
-    
+
     If the user already has an optimization running, it will be cancelled and a new one started.
 
     Parameters
@@ -448,13 +442,13 @@ async def optimize(
     # The old generator will continue running but won't update state anymore
     if user in running_optimizers:
         del running_optimizers[user]
-    
+
     # Generate unique run ID for this optimization
     run_id = str(uuid.uuid4())
-    
+
     # Ensure user has data (copy from default if needed)
     await crud.ensure_user_has_data(db, user)
-    
+
     # Get optimizer parameters from database (always returns a config, creates default if needed)
     optimizer_config = await crud.get_active_optimizer(db, user)
 
@@ -504,18 +498,18 @@ async def get_optimize_status(
             "status": "not_found",
             "message": "No optimization process found for this user."
         }
-    
+
     optimizer_state = running_optimizers[user]
     optm = optimizer_state["optimizer"]
     latest_update = optimizer_state.get("latest_update")
     status = optimizer_state.get("status", "running")
-    
+
     if status == "error":
         return {
             "status": "error",
             "error": optimizer_state.get("error", "Unknown error")
         }
-    
+
     if latest_update is None:
         return {
             "status": status,
@@ -523,17 +517,18 @@ async def get_optimize_status(
             "time": optm.time if optm.time else None,
             "progress_percentage": 0.0
         }
-    
+
     elapsed_seconds = latest_update.get("elapsed_seconds", 0)
     time_limit = optm.time if optm.time else None
-    
+
     # Calculate progress percentage
     if time_limit and time_limit > 0:
-        progress_percentage = min(100.0, (elapsed_seconds / time_limit) * 100.0)
+        progress_percentage = min(
+            100.0, (elapsed_seconds / time_limit) * 100.0)
     else:
         # If no time limit, we can't calculate percentage
         progress_percentage = None
-    
+
     return {
         "status": status,
         "elapsed_seconds": elapsed_seconds,
@@ -596,7 +591,7 @@ async def generate_calendar(
     # If generate=True, ensure user has data before generating (copy from default if needed)
     if generate:
         await crud.ensure_user_has_data(db, user)
-    
+
     # Generate new calendar
     num_units = 50
     num_days_in_year = 365

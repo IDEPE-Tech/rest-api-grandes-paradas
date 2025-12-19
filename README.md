@@ -271,13 +271,15 @@ Query parameter:
 Response:
 * `status` – string – "running", "completed", "error", or "not_found"
 * `elapsed_seconds` – float – Elapsed time in seconds
-* `time` – integer or null – Total time limit in seconds
+* `time` – integer or null – Total time limit in seconds (if mode="time")
+* `iteration` – integer – Current iteration number
+* `max_iterations` – integer or null – Maximum number of iterations (if mode="params")
 * `progress_percentage` – float or null – Progress percentage (0-100)
 
 Example:
 ```bash
 curl "http://localhost:8000/optimize/status?user=lucas"
-# => {"status": "running", "elapsed_seconds": 45.2, "time": 1800, "progress_percentage": 2.51}
+# => {"status": "running", "elapsed_seconds": 45.2, "time": 1800, "iteration": 5, "max_iterations": null, "progress_percentage": 2.51}
 ```
 
 ### 7. Set Optimization Parameters: `/optimize/parameters`

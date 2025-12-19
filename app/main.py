@@ -413,6 +413,8 @@ async def get_optimize_status(
             • ``status``: "running", "completed", "error", or "not_found"
             • ``elapsed_seconds``: elapsed time in seconds (if available)
             • ``time``: total time limit in seconds (if available)
+            • ``iteration``: current iteration number
+            • ``max_iterations``: maximum number of iterations (if mode="params")
             • ``progress_percentage``: progress percentage (0-100)
             • ``error``: error message (if status is "error")
     """
@@ -433,29 +435,40 @@ async def get_optimize_status(
             "error": optimizer_state.get("error", "Unknown error")
         }
 
-    if latest_update is None:
-        return {
-            "status": status,
-            "elapsed_seconds": 0,
-            "time": optm.time if optm.time else None,
-            "progress_percentage": 0.0
-        }
+    elapsed_seconds = 0
+    current_iteration = 0
 
-    elapsed_seconds = latest_update.get("elapsed_seconds", 0)
-    time_limit = optm.time if optm.time else None
+    if latest_update:
+        elapsed_seconds = latest_update.get("elapsed_seconds", 0)
+        current_iteration = latest_update.get("iteration", 0)
 
-    # Calculate progress percentage
-    if time_limit and time_limit > 0:
-        progress_percentage = min(
-            100.0, (elapsed_seconds / time_limit) * 100.0)
-    else:
-        # If no time limit, we can't calculate percentage
-        progress_percentage = None
+    time_limit = None
+    max_iterations = None
+    progress_percentage = 0.0
+
+    # Calculate progress percentage based on mode
+    if optm.mode == "time":
+        time_limit = optm.time
+        if time_limit and time_limit > 0:
+            progress_percentage = min(
+                100.0, (elapsed_seconds / time_limit) * 100.0)
+    elif optm.mode == "params":
+        # Identify max iterations based on method
+        if optm.method == "AG":
+            max_iterations = optm.n_gen
+        elif optm.method == "ACO":
+            max_iterations = optm.n_iter
+
+        if max_iterations and max_iterations > 0:
+            progress_percentage = min(
+                100.0, (current_iteration / max_iterations) * 100.0)
 
     return {
         "status": status,
         "elapsed_seconds": elapsed_seconds,
         "time": time_limit,
+        "iteration": current_iteration,
+        "max_iterations": max_iterations,
         "progress_percentage": progress_percentage
     }
 

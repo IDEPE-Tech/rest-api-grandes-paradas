@@ -43,43 +43,33 @@ git submodule update --remote optimizer-grandes-paradas
 
 ---
 
-## 📦 Building the Docker image
-
-```bash
-# Clone the repository (skip if you have it already)
-# git clone https://github.com/IDEPE-Tech/rest-api-grandes-paradas.git
-# cd rest-api-grandes-paradas
-
-# Build the image (the period is important)
-docker build -t grandes-paradas-api .
-```
-
-* `-t grandes-paradas-api` tags the resulting image so you can reference it later.
-* The build will install `uvicorn`, `fastapi`, and other dependencies listed in `requirements.txt`.
-
-## ⬇️ Pulling container from Dockerhub
-The container is also available on Dockerhub. Run this commmand to get it already prepared to run and tag it with the tag we are using in this instructions file:
-
-```bash
-docker pull idepetech/grandes-paradas:0.3.0
-docker tag idepetech/grandes-paradas:0.3.0 grandes-paradas-api:latest
-```
-
-You can follow the runnning section to use the API methods.
-
 ## 🚀 Running with Docker Compose (Recommended)
 
-The easiest way to run the application is using Docker Compose:
+There are two main ways to run this project: **Production Mode** (using the pre-built image from Docker Hub) and **Development Mode** (building from local source).
+
+### 1️⃣ Production / Standard Use
+
+To run the application using the official image from Docker Hub:
 
 ```bash
-# Build and run in one command
-docker compose up --build -d
+# Pull the latest image and start containers
+docker compose up -d
 ```
 
-* `--build` builds the image before starting
-* `-d` runs the container in the background (detached mode)
+* This uses `docker-compose.yml` which points to the `idepetech/grandes-paradas` image.
+* No need to install Python or build anything manually.
 
-After the container starts, the API will be reachable at **<http://localhost:8000>**.
+### 2️⃣ Development Mode
+
+If you are a developer and want to build the image from your local source code (e.g., to test changes):
+
+```bash
+# Build locally and run
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build -d
+```
+
+* This uses `docker-compose.dev.yml` to override the image source and forces a local `build`.
+* Useful for testing changes in `app/` or `optimizer-grandes-paradas/`.
 
 ### Managing the container:
 
@@ -94,22 +84,25 @@ docker compose logs -f
 docker compose restart
 ```
 
-## 🐳 Alternative: Running with Docker directly
+## 📦 Building/Pulling Manually (Optional)
 
-If you prefer to use Docker directly:
+If you prefer to manage images manually without standard Compose commands:
 
+**Pull from Hub:**
 ```bash
-docker run -d --name grandes-paradas-api -p 8000:8000 grandes-paradas-api
+docker pull idepetech/grandes-paradas:0.3.0
 ```
 
-* `-d` runs the container in the background.
-* `--name` gives it an easy-to-remember name.
-* `-p 8000:8000` maps the container's port **8000** (exposed by the Dockerfile) to your host.
-
-To stop and remove the container:
-
+**Build Manually:**
 ```bash
-docker rm -f grandes-paradas-api
+docker build -t grandes-paradas-api .
+```
+
+**Run Manually (without Compose):**
+```bash
+docker run -d --name grandes-paradas-api -p 8000:8000 grandes-paradas-api
+# OR
+docker run -d --name grandes-paradas-api -p 8000:8000 idepetech/grandes-paradas:0.3.0
 ```
 
 ---

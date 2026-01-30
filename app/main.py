@@ -27,7 +27,17 @@ from optimize_module import Optimizer, constants
 
 # Import database modules
 
+from fastapi.middleware.cors import CORSMiddleware
+
 app = FastAPI(title="Grandes Paradas API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # In-memory storage for running optimizers per user
 # Structure: {user: {"optimizer": Optimizer, "generator": generator, "latest_update": dict, "status": str, "run_id": str}}

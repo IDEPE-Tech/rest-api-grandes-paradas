@@ -65,7 +65,7 @@ If you are a developer and want to build the image from your local source code (
 
 ```bash
 # Build locally and run
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build -d
+docker compose -f docker-compose.dev.yml up --build -d
 ```
 
 * This uses `docker-compose.dev.yml` to override the image source and forces a local `build`.
@@ -90,7 +90,7 @@ If you prefer to manage images manually without standard Compose commands:
 
 **Pull from Hub:**
 ```bash
-docker pull idepetech/grandes-paradas:0.3.0
+docker pull idepetech/grandes-paradas:0.4.0
 ```
 
 **Build Manually:**
@@ -102,7 +102,7 @@ docker build -t grandes-paradas-api .
 ```bash
 docker run -d --name grandes-paradas-api -p 8000:8000 grandes-paradas-api
 # OR
-docker run -d --name grandes-paradas-api -p 8000:8000 idepetech/grandes-paradas:0.3.0
+docker run -d --name grandes-paradas-api -p 8000:8000 idepetech/grandes-paradas:0.4.0
 ```
 
 ---
